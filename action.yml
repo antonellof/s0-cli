@@ -1,7 +1,5 @@
 name: "s0-cli security scan"
-description: >-
-  Run s0-cli (Meta-Harness security agent) against this repo and upload SARIF
-  results to GitHub code scanning. Works on PRs (diff mode) and on push (full repo).
+description: "LLM agent that runs SAST scanners + AI-slop detectors, triages every finding, and uploads SARIF to code scanning."
 author: "antonellof"
 branding:
   icon: "shield"
