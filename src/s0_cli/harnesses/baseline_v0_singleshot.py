@@ -7,11 +7,14 @@ to *beat* this on accuracy by spending more turns; if it can't, keep this.
 
 from __future__ import annotations
 
+import time
+
 from s0_cli.config import get_settings
 from s0_cli.harness.base import Harness, ScanResult
 from s0_cli.harness.bootstrap import env_snapshot
 from s0_cli.harness.llm import LLM
 from s0_cli.harness.loop import agent_loop
+from s0_cli.harness.progress import emit as _emit
 from s0_cli.harness.tools import ToolContext, Tools, _finding_summary
 from s0_cli.prompts import load as load_prompt
 from s0_cli.scanners.semgrep import SemgrepScanner
@@ -41,10 +44,26 @@ class BaselineV0SingleShot(Harness):
         return self
 
     async def scan(self, target: Target) -> ScanResult:
+        _emit("phase_start", name="env_snapshot")
         env = await env_snapshot(target)
+        _emit("phase_done", name="env_snapshot", file_count=env.file_count)
 
         scanner = SemgrepScanner()
-        seed_findings = scanner.run(target) if scanner.is_available() else []
+        if scanner.is_available():
+            _emit("scanner_start", name="semgrep", index=1, total=1)
+            t0 = time.monotonic()
+            seed_findings = scanner.run(target)
+            _emit(
+                "scanner_done",
+                name="semgrep",
+                index=1,
+                total=1,
+                findings=len(seed_findings),
+                duration_ms=int((time.monotonic() - t0) * 1000),
+            )
+        else:
+            _emit("scanner_skip", name="semgrep", reason="not_installed", index=1, total=1)
+            seed_findings = []
 
         ctx = ToolContext(target=target, output_cap_bytes=self.output_cap_bytes)
         tools = Tools(ctx)
@@ -58,6 +77,7 @@ class BaselineV0SingleShot(Harness):
             f"task_complete. No investigation tools available."
         )
 
+        _emit("phase_start", name="agent_loop", max_turns=self.max_turns)
         loop_result = await agent_loop(
             llm=self._llm,
             tools=tools,
@@ -66,6 +86,12 @@ class BaselineV0SingleShot(Harness):
             tool_schemas=Tools.SINGLESHOT_SCHEMAS,
             max_turns=self.max_turns,
             token_budget=self.token_budget,
+        )
+        _emit(
+            "phase_done",
+            name="agent_loop",
+            turns=loop_result.usage.get("turns", 0),
+            ended_via=loop_result.ended_via,
         )
 
         findings = loop_result.findings

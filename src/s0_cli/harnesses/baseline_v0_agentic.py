@@ -18,11 +18,14 @@ turn cap, what it does with falsy/empty seeds, post-processing, etc.
 
 from __future__ import annotations
 
+import time
+
 from s0_cli.config import get_settings
 from s0_cli.harness.base import Harness, ScanResult
 from s0_cli.harness.bootstrap import env_snapshot
 from s0_cli.harness.llm import LLM
 from s0_cli.harness.loop import agent_loop
+from s0_cli.harness.progress import emit as _emit
 from s0_cli.harness.tools import ToolContext, Tools, _finding_summary
 from s0_cli.prompts import load as load_prompt
 from s0_cli.scanners import REGISTRY as SCANNER_REGISTRY
@@ -61,8 +64,13 @@ class BaselineV0Agentic(Harness):
         return self
 
     async def scan(self, target: Target) -> ScanResult:
+        _emit("phase_start", name="env_snapshot")
         env = await env_snapshot(target)
+        _emit("phase_done", name="env_snapshot", file_count=env.file_count)
+
+        _emit("phase_start", name="seed_scanners", scanners=list(self.default_scanners))
         seed_findings = _seed_from_scanners(self.default_scanners, target)
+        _emit("phase_done", name="seed_scanners", findings=len(seed_findings))
 
         ctx = ToolContext(target=target, output_cap_bytes=self.output_cap_bytes)
         tools = Tools(ctx)
@@ -79,6 +87,7 @@ class BaselineV0Agentic(Harness):
             f"sweep for vibe-code patterns, then call task_complete."
         )
 
+        _emit("phase_start", name="agent_loop", max_turns=self.max_turns)
         loop_result = await agent_loop(
             llm=self._llm,
             tools=tools,
@@ -87,6 +96,12 @@ class BaselineV0Agentic(Harness):
             tool_schemas=Tools.SCHEMAS,
             max_turns=self.max_turns,
             token_budget=self.token_budget,
+        )
+        _emit(
+            "phase_done",
+            name="agent_loop",
+            turns=loop_result.usage.get("turns", 0),
+            ended_via=loop_result.ended_via,
         )
 
         findings = loop_result.findings
@@ -111,18 +126,45 @@ def _seed_from_scanners(names: tuple[str, ...], target: Target) -> list[Finding]
     LLM still sees a `seed_findings` list, just shorter.
     """
     deduped: dict[tuple[str, int, str], Finding] = {}
-    for name in names:
+    total = len(names)
+    for index, name in enumerate(names, start=1):
         scanner_cls = SCANNER_REGISTRY.get(name)
         if scanner_cls is None:
+            _emit("scanner_skip", name=name, reason="unknown", index=index, total=total)
             continue
         scanner = scanner_cls()
         if not scanner.is_available():
+            _emit(
+                "scanner_skip",
+                name=name,
+                reason="not_installed",
+                index=index,
+                total=total,
+            )
             continue
+        _emit("scanner_start", name=name, index=index, total=total)
+        t0 = time.monotonic()
         try:
             findings = scanner.run(target)
         except Exception as e:  # noqa: BLE001 — seed-phase isolation
+            _emit(
+                "scanner_done",
+                name=name,
+                index=index,
+                total=total,
+                error=f"{type(e).__name__}: {e}",
+                duration_ms=int((time.monotonic() - t0) * 1000),
+            )
             print(f"warning: seed scanner {name!r} failed: {type(e).__name__}: {e}")
             continue
+        _emit(
+            "scanner_done",
+            name=name,
+            index=index,
+            total=total,
+            findings=len(findings),
+            duration_ms=int((time.monotonic() - t0) * 1000),
+        )
         for f in findings:
             key = (f.path, f.line, _normalize_rule(f.rule_id))
             existing = deduped.get(key)

@@ -58,6 +58,9 @@ uv run s0 scan ./path/to/repo --no-llm --format sarif --out report.sarif
 # Fail the build if any high-severity issue is found
 uv run s0 scan . --fail-on high
 
+# Stream every step the agent takes (scanners, LLM turns, tool calls)
+uv run s0 scan ./path/to/repo -v
+
 # Inspect what the agent did (full prompt + tool trace per scan)
 uv run s0 runs list
 uv run s0 runs show <run_id>

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from s0_cli.harness.llm import LLM, ContextOverflowError
+from s0_cli.harness.progress import emit as _emit
 from s0_cli.harness.tools import ToolCallRecord, Tools
 
 
@@ -66,6 +67,13 @@ async def agent_loop(
     while turn < max_turns:
         turn += 1
         t0 = time.monotonic()
+        _emit(
+            "llm_turn_start",
+            turn=turn,
+            max_turns=max_turns,
+            tokens_in=total_in,
+            tokens_out=total_out,
+        )
 
         try:
             resp = await llm.complete(
@@ -103,6 +111,16 @@ async def agent_loop(
         total_in += resp.input_tokens
         total_out += resp.output_tokens
         total_cached += resp.cached_input_tokens
+
+        _emit(
+            "llm_turn_done",
+            turn=turn,
+            duration_ms=elapsed_ms,
+            input_tokens=resp.input_tokens,
+            output_tokens=resp.output_tokens,
+            tool_calls=[tc["name"] for tc in resp.tool_calls],
+            finish_reason=resp.finish_reason,
+        )
 
         trace.append(
             {
@@ -144,8 +162,20 @@ async def agent_loop(
 
         for i, tc in enumerate(resp.tool_calls):
             ts = time.monotonic()
+            _emit(
+                "tool_call_start",
+                turn=turn,
+                name=tc["name"],
+                arguments=tc.get("arguments", {}),
+            )
             result = tools.dispatch(tc["name"], tc.get("arguments", {}))
             tool_dur = int((time.monotonic() - ts) * 1000)
+            _emit(
+                "tool_call_done",
+                turn=turn,
+                name=tc["name"],
+                duration_ms=tool_dur,
+            )
             tools.ctx.trace.append(
                 ToolCallRecord(
                     name=tc["name"],

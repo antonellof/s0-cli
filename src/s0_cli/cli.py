@@ -16,6 +16,7 @@ from s0_cli.config import SEVERITY_RANK, get_settings
 from s0_cli.eval.runner import EvalRunner, load_harness_by_name
 from s0_cli.eval.validate import validate_harness
 from s0_cli.harness.llm import have_provider_key
+from s0_cli.harness.progress import reset_sink, set_sink
 from s0_cli.report import to_json, to_markdown, to_sarif
 from s0_cli.runs.cli import runs_app
 from s0_cli.runs.store import RunStore, write_run
@@ -23,6 +24,7 @@ from s0_cli.scanners import REGISTRY as SCANNER_REGISTRY
 from s0_cli.targets.diff import build_diff_target
 from s0_cli.targets.file import build_file_target
 from s0_cli.targets.repo import build_repo_target
+from s0_cli.ui.progress import RichProgressSink
 
 app = typer.Typer(
     name="s0",
@@ -87,6 +89,17 @@ def cmd_scan(
         None, "--fail-on", help="Exit non-zero if a finding meets this severity."
     ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress preview output."),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Stream every progress event (scanner start/finish, LLM turn, tool call).",
+    ),
+    no_progress: bool = typer.Option(
+        False,
+        "--no-progress",
+        help="Disable the live status spinner. Implied by --quiet.",
+    ),
 ) -> None:
     """Scan a target with the configured inner harness."""
     settings = get_settings()
@@ -113,7 +126,21 @@ def cmd_scan(
             f"model={settings.model} no_llm={no_llm}"
         )
 
-    result = asyncio.run(h.scan(target))
+    show_progress = (
+        not quiet
+        and not no_progress
+        and (sys.stderr.isatty() or verbose)
+    )
+    if show_progress:
+        progress_console = Console(stderr=True)
+        with RichProgressSink(progress_console, verbose=verbose) as sink:
+            token = set_sink(sink)
+            try:
+                result = asyncio.run(h.scan(target))
+            finally:
+                reset_sink(token)
+    else:
+        result = asyncio.run(h.scan(target))
 
     invocation = " ".join(["s0", "scan", str(path), "--mode", mode] + (["--no-llm"] if no_llm else []))
     store = RunStore(settings.runs_dir)
