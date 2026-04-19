@@ -162,19 +162,37 @@ uv run s0 eval --no-llm
 
 `s0 eval` writes a scored run to `runs/`, the same place `s0 scan` writes; everything is uniformly inspectable with `s0 runs`.
 
-## Optimizing the agent
+## Optimizing the agent (Meta-Harness)
 
-The scanning agent is a single Python file. `s0 optimize` runs a Meta-Harness outer loop: a coding-agent proposer reads `runs/` (prior agents + scores + traces), proposes a new agent file, the runner validates it and re-scores it on the bench, and the cycle repeats. The proposer's contract is in [`SKILL.md`](SKILL.md).
+The scanning agent is a single Python file. Most security tools encode their heuristics either in scattered config (`.semgrepignore`, custom rule files, hand-tuned LLM prompts) or in undocumented engineer intuition. s0-cli encodes them in a versioned harness file that gets *automatically rewritten* by an outer optimization loop, based on real evaluation data — this is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach (Lee et al., 2026).
+
+![s0 optimize outer loop](docs/img/optimize-loop.png)
+
+`s0 optimize` runs the loop: a coding-agent proposer reads `runs/` (every prior agent, every score, every tool trace), forms a hypothesis about the worst current failure mode, writes a new harness file under `src/s0_cli/harnesses/`, and the runner validates and re-scores it on `bench/tasks_train/`. After all training iterations finish, the best-train-F1 candidate is scored once on the disjoint `bench/tasks_test/` to measure generalization. The proposer's contract is in [`SKILL.md`](SKILL.md).
+
+### Why this is different from "just iterating on the prompt"
+
+| | Hand-tuning prompts/rules | Meta-Harness loop |
+| - | - | - |
+| **What changes** | a string in a config file | a whole single-file Python agent (prompts + tools + scanner-selection + dedup logic) |
+| **What measures progress** | "feels better on my test repo" | a labeled bench scored by F1, precision, recall, tokens, turns |
+| **What guards overfitting** | nothing | held-out `bench/tasks_test/` the proposer never sees |
+| **History** | `git log` of edits, no scores attached | every attempt + score + full trace lives forever in `runs/<id>/` |
+| **Cost vs. accuracy** | implicit; you pick one config | explicit Pareto frontier (F1 ↑ vs. tokens ↓) snapshotted to `runs/_frontier.json` |
+| **Reproducibility** | rerun and hope | `s0 runs show <id>` replays the exact harness file, prompts, and tool calls |
+| **Rollback** | manual revert | the prior harness file is still on disk; just point `S0_DEFAULT_HARNESS` at it |
+
+### Concrete leverage
+
+- **Search beats intuition.** The proposer can try ideas a human wouldn't bother with — "lower confidence on bandit B608 inside `tests/` directories", "escalate to critical when `pickle.loads` is reachable from a Flask handler", "skip semgrep's `python.lang.security.audit.dangerous-subprocess-use` for `subprocess.run` calls whose first argument is a list literal" — and *measure* whether each one helps.
+- **Pareto, not point estimates.** Real choice in CI isn't "best F1", it's "best F1 at the token budget I can afford on a PR". The frontier file gives you that menu directly.
+- **Generalization is enforced.** The proposer can't see `tasks_test/` and the loop refuses to start if the train and test paths resolve to the same directory. So a +0.1 F1 on train that comes with a -0.05 test gap shows up in the summary table — you can't cheat your own benchmark.
+- **Every iteration is auditable.** Each attempt is one new file plus a `runs/<id>/` directory containing `harness.py`, `score.json`, `summary.md`, and per-task traces with the full prompt and every tool call. Disk-as-database; no schema migrations, just `grep`.
 
 ```bash
-# Three iterations on the default training set, then a held-out test eval
-uv run s0 optimize -n 3
-
-# Isolate the experiment under runs/exp1/, starting from a clean slate
-uv run s0 optimize -n 5 --fresh --run-name exp1
-
-# Smoke test the loop without spending any tokens
-uv run s0 optimize -n 1 --no-llm
+uv run s0 optimize -n 3                            # 3 iterations on train, then held-out test pass
+uv run s0 optimize -n 5 --fresh --run-name exp1    # isolate under runs/exp1/, clean slate
+uv run s0 optimize -n 1 --no-llm                   # smoke test the loop, zero tokens spent
 ```
 
 After every iteration the Pareto frontier (F1 vs. tokens) is snapshotted to `runs/_frontier.json`. The session ends with a final pass on `bench/tasks_test/` that prints the train→test generalization gap. `Ctrl+C` finishes the current iteration and exits cleanly; press it twice to abort.
