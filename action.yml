@@ -1,0 +1,156 @@
+name: "s0-cli security scan"
+description: >-
+  Run s0-cli (Meta-Harness security agent) against this repo and upload SARIF
+  results to GitHub code scanning. Works on PRs (diff mode) and on push (full repo).
+author: "s0-cli contributors"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  mode:
+    description: "Scan mode: repo, diff, or file."
+    required: false
+    default: "repo"
+  diff-ref:
+    description: "Git ref to diff against when mode=diff (default: PR base, else origin/main)."
+    required: false
+    default: ""
+  path:
+    description: "Path to scan, relative to the workspace."
+    required: false
+    default: "."
+  harness:
+    description: "Inner harness name (default: configured baseline)."
+    required: false
+    default: ""
+  no-llm:
+    description: "Skip the LLM and use raw scanner findings only. Free, deterministic."
+    required: false
+    default: "false"
+  fail-on:
+    description: "Exit non-zero if a finding meets this severity (info/low/medium/high/critical)."
+    required: false
+    default: "high"
+  upload-sarif:
+    description: "Upload the SARIF report to GitHub code scanning. Requires `security-events: write`."
+    required: false
+    default: "true"
+  sarif-output:
+    description: "Path to write the SARIF report."
+    required: false
+    default: "s0-results.sarif"
+  model:
+    description: "LiteLLM model identifier (overrides repo default; e.g. openai/gpt-4o-mini)."
+    required: false
+    default: ""
+  s0-version:
+    description: "s0-cli version/git ref to install (PyPI version or git ref). Default: latest from main."
+    required: false
+    default: "main"
+  openai-api-key:
+    description: "OpenAI API key. Mutually exclusive with anthropic/gemini keys."
+    required: false
+    default: ""
+  anthropic-api-key:
+    description: "Anthropic API key."
+    required: false
+    default: ""
+  gemini-api-key:
+    description: "Google Gemini API key."
+    required: false
+    default: ""
+
+outputs:
+  sarif-path:
+    description: "Path to the SARIF file written by the scan."
+    value: ${{ steps.scan.outputs.sarif-path }}
+  findings-count:
+    description: "Number of findings in the SARIF report (0 if none)."
+    value: ${{ steps.scan.outputs.findings-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install ripgrep
+      shell: bash
+      run: |
+        if ! command -v rg >/dev/null 2>&1; then
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ripgrep
+        fi
+
+    - name: Install s0-cli
+      shell: bash
+      run: |
+        set -euo pipefail
+        ref='${{ inputs.s0-version }}'
+        if [[ "$ref" == "main" || "$ref" =~ ^[a-f0-9]{7,40}$ || "$ref" == v* ]]; then
+          # Install from a git ref so users can pin behavior to a tag/sha.
+          pip install "git+https://github.com/${GITHUB_ACTION_REPOSITORY:-}@${ref}"
+        else
+          pip install "s0-cli==${ref}"
+        fi
+        s0 version
+
+    - name: Resolve diff base
+      id: diffbase
+      shell: bash
+      run: |
+        ref='${{ inputs.diff-ref }}'
+        if [[ -z "$ref" ]]; then
+          if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]]; then
+            ref="origin/${GITHUB_BASE_REF}"
+            git fetch --no-tags --prune --depth=50 origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}" || true
+          else
+            ref="origin/main"
+          fi
+        fi
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+    - name: Run s0-cli
+      id: scan
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        S0_MODEL: ${{ inputs.model }}
+      run: |
+        set -euo pipefail
+        args=(scan "${{ inputs.path }}" --mode "${{ inputs.mode }}" --format sarif --out "${{ inputs.sarif-output }}" --fail-on "${{ inputs.fail-on }}")
+        if [[ "${{ inputs.mode }}" == "diff" ]]; then
+          args+=(--diff "${{ steps.diffbase.outputs.ref }}")
+        fi
+        if [[ "${{ inputs.harness }}" != "" ]]; then
+          args+=(--harness "${{ inputs.harness }}")
+        fi
+        if [[ "${{ inputs.no-llm }}" == "true" ]]; then
+          args+=(--no-llm)
+        fi
+        # Run the scan; capture exit code separately so we can still upload SARIF on failures.
+        set +e
+        s0 "${args[@]}"
+        status=$?
+        set -e
+        echo "sarif-path=${{ inputs.sarif-output }}" >> "$GITHUB_OUTPUT"
+        if [[ -s "${{ inputs.sarif-output }}" ]]; then
+          # Quick count via python so we don't need jq.
+          n=$(python -c "import json,sys; r=json.load(open('${{ inputs.sarif-output }}')); print(sum(len(x.get('results',[])) for x in r.get('runs',[])))")
+          echo "findings-count=$n" >> "$GITHUB_OUTPUT"
+        else
+          echo "findings-count=0" >> "$GITHUB_OUTPUT"
+        fi
+        exit $status
+
+    - name: Upload SARIF to code scanning
+      if: ${{ always() && inputs.upload-sarif == 'true' && hashFiles(inputs.sarif-output) != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-output }}
+        category: s0-cli

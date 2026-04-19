@@ -1,0 +1,42 @@
+# Keep the build context small + reproducible.
+
+# VCS / IDE
+.git/
+.github/
+.gitignore
+.idea/
+.vscode/
+
+# Python tooling caches
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local secrets / runtime state
+.env
+.env.*
+runs/
+.s0-cache/
+*.log
+
+# Tests + bench are not needed inside the runtime image — they're only used
+# locally and in CI to develop/score harnesses.
+tests/
+bench/
+
+# Everything in docs/ is reference material, not runtime.
+docs/
+
+# OS junk
+.DS_Store
+Thumbs.db

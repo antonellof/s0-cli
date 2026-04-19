@@ -1,0 +1,39 @@
+# Hook manifest consumed by https://pre-commit.com.
+#
+# Consumers add this snippet to their `.pre-commit-config.yaml`:
+#
+#   repos:
+#     - repo: https://github.com/<owner>/s0-cli
+#       rev: v0.0.1   # or a commit SHA
+#       hooks:
+#         - id: s0-scan-staged          # fast, no LLM, runs on every commit
+#         - id: s0-scan-diff            # full LLM scan of the diff (pre-push)
+#           stages: [pre-push]
+
+- id: s0-scan-staged
+  name: s0-cli (staged files, no LLM)
+  description: >-
+    Runs s0-cli's deterministic scanners (semgrep, bandit, ruff, gitleaks,
+    trivy, hallucinated-import) on staged files. No API key needed; designed
+    to be fast enough for every commit.
+  entry: s0 scan
+  language: python
+  additional_dependencies: ["s0-cli"]
+  args: ["--mode", "file", "--no-llm", "--fail-on", "high", "--quiet"]
+  pass_filenames: true
+  files: \.(py|js|ts|tsx|jsx|go|rb|java|kt|rs|php|sh|yaml|yml|tf|dockerfile)$
+  exclude: ^(tests?|test|__tests__|node_modules|vendor|dist|build)/
+
+- id: s0-scan-diff
+  name: s0-cli (diff vs origin/main, full LLM triage)
+  description: >-
+    Runs s0-cli in diff mode against origin/main with the LLM-driven agent
+    enabled. Slower (~30-60s) and requires OPENAI_API_KEY / ANTHROPIC_API_KEY
+    in the environment. Recommended at the pre-push stage.
+  entry: s0 scan
+  language: python
+  additional_dependencies: ["s0-cli"]
+  args: ["--mode", "diff", "--diff", "origin/main", "--fail-on", "high", "--quiet"]
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]

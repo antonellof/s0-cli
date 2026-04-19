@@ -69,6 +69,65 @@ uv run s0 runs grep "CWE-89"
 
 Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHub code-scanning, GitLab SAST, etc.).
 
+## Use it in CI
+
+Three drop-in integrations ship with the repo so you don't have to assemble the runtime yourself. Pick whichever matches your workflow.
+
+### GitHub Action
+
+Wraps `s0 scan` and uploads the SARIF report to your repo's Security tab. Diff mode on PRs, full-repo on `main`/cron.
+
+```yaml
+# .github/workflows/s0-scan.yml
+name: s0-cli scan
+on:
+  pull_request:
+  push: { branches: [main] }
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: <owner>/s0-cli@v0
+        with:
+          mode: ${{ github.event_name == 'pull_request' && 'diff' || 'repo' }}
+          fail-on: high
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+```
+
+Inputs are documented in [`action.yml`](action.yml). The reusable example in [`.github/workflows/example-pr-scan.yml`](.github/workflows/example-pr-scan.yml) is what we use to dogfood it on this repo.
+
+### Docker
+
+Multi-arch image with every scanner pre-installed (semgrep, bandit, ruff, gitleaks, trivy, ripgrep). Reproducible — versions are pinned in the [`Dockerfile`](Dockerfile).
+
+```bash
+docker run --rm -v "$PWD:/work" -w /work \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  ghcr.io/<owner>/s0-cli:latest scan .
+```
+
+The published `:latest` tag tracks `main`; pin to a `vX.Y.Z` tag or a short SHA for reproducible CI.
+
+### pre-commit hook
+
+Two hooks ship in [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml). The fast one runs the deterministic scanners on staged files (no LLM, no API key); the slower one runs the full LLM agent on the diff at push time.
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/<owner>/s0-cli
+    rev: v0.0.1
+    hooks:
+      - id: s0-scan-staged                   # every commit, ~1-2s
+      - id: s0-scan-diff                     # pre-push, ~30-60s, needs an LLM key
+        stages: [pre-push]
+```
+
 ## Why not just run `semgrep` directly?
 
 Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.
@@ -191,6 +250,17 @@ The scanning agent is a single Python file. Most security tools encode their heu
 - **Pareto, not point estimates.** Real choice in CI isn't "best F1", it's "best F1 at the token budget I can afford on a PR". The frontier file gives you that menu directly.
 - **Generalization is enforced.** The proposer can't see `tasks_test/` and the loop refuses to start if the train and test paths resolve to the same directory. So a +0.1 F1 on train that comes with a -0.05 test gap shows up in the summary table — you can't cheat your own benchmark.
 - **Every iteration is auditable.** Each attempt is one new file plus a `runs/<id>/` directory containing `harness.py`, `score.json`, `summary.md`, and per-task traces with the full prompt and every tool call. Disk-as-database; no schema migrations, just `grep`.
+
+### Multi-candidate proposals
+
+Pass `-k N` (or `--candidates N`) to fan out **N parallel proposals per iteration**, each with a different temperature, seed harness, and focus directive. The runner evaluates them concurrently and keeps the highest-F1 winner; losers are still recorded under `runs/` so you can see what each design slot tried.
+
+```bash
+# 2 parallel proposals per iteration; pick the better one each time
+uv run s0 optimize -n 5 -k 2 --run-name exp_multicand --fresh
+```
+
+Cost scales linearly with `k`, but wall-clock cost stays roughly constant (the proposers run concurrently). The strategy ladder lives in [`src/s0_cli/optimizer/strategies.py`](src/s0_cli/optimizer/strategies.py) and is deterministic — `k=2` always means slot 0 (greedy, exploit) plus slot 1 (warmer, "shrink token cost"), so reruns hit the same regions of design space.
 
 ```bash
 uv run s0 optimize -n 3                            # 3 iterations on train, then held-out test pass
