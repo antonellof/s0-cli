@@ -171,21 +171,25 @@ def _normalize_response(resp: Any) -> LLMResponse:
 def _stub_response(tools: list[dict[str, Any]] | None) -> LLMResponse:
     """Deterministic response for --no-llm / tests.
 
-    Strategy: if `task_complete` is among the tools, call it. Otherwise return
-    a tiny content message. This lets the agent loop terminate cleanly without
-    a real model.
+    Strategy: if any termination tool (`task_complete`, `finish`) is among the
+    available tools, call it with empty/minimal args. This lets any agent loop
+    terminate cleanly without a real model.
     """
     if tools:
-        for t in tools:
-            fn = t.get("function", {})
-            if fn.get("name") == "task_complete":
-                return LLMResponse(
-                    content=None,
-                    tool_calls=[
-                        {"id": "stub-0", "name": "task_complete", "arguments": {}}
-                    ],
-                    finish_reason="tool_calls",
-                )
+        for term_name in ("task_complete", "finish"):
+            for t in tools:
+                fn = t.get("function", {})
+                if fn.get("name") == term_name:
+                    args: dict[str, Any] = {}
+                    if term_name == "finish":
+                        args = {"summary": "(no-llm stub: no proposal made)"}
+                    return LLMResponse(
+                        content=None,
+                        tool_calls=[
+                            {"id": "stub-0", "name": term_name, "arguments": args}
+                        ],
+                        finish_reason="tool_calls",
+                    )
     return LLMResponse(content="(no-llm stub: nothing to do)", finish_reason="stop")
 
 

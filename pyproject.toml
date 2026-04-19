@@ -62,6 +62,8 @@ ignore = [
 "src/s0_cli/harness/tools.py" = ["E501"]
 "src/s0_cli/scanners/base.py" = ["E501"]
 "src/s0_cli/report/sarif.py" = ["E501"]
+"src/s0_cli/optimizer/tools.py" = ["E501"]
+"src/s0_cli/optimizer/context.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -219,6 +219,57 @@ def cmd_eval(
     console.print(f"[bold]aggregate[/]: {summary.aggregate}")
 
 
+@app.command("optimize")
+def cmd_optimize(
+    iterations: int = typer.Option(3, "--iterations", "-n", help="Outer-loop iterations."),
+    bench: Path = typer.Option(Path("bench/tasks"), "--bench"),
+    only: str | None = typer.Option(None, "--only", help="Comma-separated bench task IDs."),
+    skill: Path = typer.Option(Path("SKILL.md"), "--skill", help="SKILL.md path."),
+    max_proposer_turns: int = typer.Option(25, "--max-turns", help="Max tool-loop turns per proposal."),
+    no_llm: bool = typer.Option(
+        False, "--no-llm", help="Stub mode (proposer + harness both skip LLM; smoke-test only)."
+    ),
+) -> None:
+    """Outer Meta-Harness loop: propose -> validate -> eval, repeated.
+
+    Each iteration: a coding-agent proposer reads `runs/` + `SKILL.md`, writes
+    a new harness file under `src/s0_cli/harnesses/`, and the runner evaluates
+    it on the bench. Each iteration writes one new run to `runs/`.
+    """
+    from s0_cli.harnesses import __path__ as harnesses_path  # type: ignore[attr-defined]
+    from s0_cli.optimizer.loop import cli_run_optimizer_sync
+    from s0_cli.prompts import __path__ as prompts_path  # type: ignore[attr-defined]
+
+    settings = get_settings()
+    only_list = [x.strip() for x in only.split(",")] if only else None
+
+    if not no_llm and not have_provider_key(settings.model):
+        console.print(
+            f"[red]No API key found for model {settings.model}.[/red] "
+            "Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY, "
+            "or run with --no-llm for a smoke-test."
+        )
+        raise typer.Exit(code=2)
+
+    console.print(
+        f"[bold]optimize[/] iterations={iterations} bench={bench} "
+        f"model={settings.model} no_llm={no_llm}"
+    )
+
+    cli_run_optimizer_sync(
+        runs_dir=settings.runs_dir,
+        bench_dir=bench,
+        skill_md_path=skill,
+        harnesses_dir=Path(harnesses_path[0]),
+        prompts_dir=Path(prompts_path[0]),
+        iterations=iterations,
+        max_proposer_turns=max_proposer_turns,
+        no_llm=no_llm,
+        only_tasks=only_list,
+        console=console,
+    )
+
+
 def main() -> None:
     app()
 
