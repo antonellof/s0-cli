@@ -1,0 +1,12 @@
+{
+  "tp": 5,
+  "fp": 8,
+  "fn": 3,
+  "precision": 0.3846,
+  "recall": 0.625,
+  "f1": 0.4762,
+  "input_tokens": 4451,
+  "output_tokens": 1259,
+  "cached_input_tokens": 0,
+  "turns": 7
+}

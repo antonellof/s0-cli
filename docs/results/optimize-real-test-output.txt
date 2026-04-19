@@ -1,0 +1,43 @@
+optimize iterations=2 train_bench=bench/tasks_train test_bench=bench/tasks_test 
+model=openai/gpt-4o-mini no_llm=False
+using isolated runs dir: runs/real_test
+multi-candidate mode: 2 parallel proposals/iter (temps=[0.0, 0.4])
+──────────────────────────── optimize iteration 1/2 ────────────────────────────
+context: 0 prior runs, frontier=[], best_f1=None
+c1 running eval on harness=v1_single_shot_c1
+c0 running eval on harness=v1_severity_filter_c0
+c0 eval: f1=0.0 prec=0.0 rec=0.0 tokens=0
+c1 eval: f1=0.4762 prec=0.3846 rec=0.625 tokens=5710
+iter 1 winner: c1 (c0=f1:0.000, c1=f1:0.476)
+frontier snapshot -> runs/real_test/_frontier.json
+──────────────────────────── optimize iteration 2/2 ────────────────────────────
+context: 2 prior runs, 
+frontier=['2026-04-19T15-17-59Z__v1_single_shot_c1__3bb0'], best_f1=0.4762
+c1 import failed: LLM.__init__() missing 1 required positional argument: 'model'
+c0 running eval on harness=v1_command_injection_filter_c0
+c0 eval: f1=0.0 prec=0.0 rec=0.0 tokens=0
+iter 2 winner: c0 (c0=f1:0.000, c1=skip)
+frontier snapshot -> runs/real_test/_frontier.json
+────────────────────── final test eval: v1_single_shot_c1 ──────────────────────
+running on held-out bench=bench/tasks_test (train_f1=0.476, no_llm=False)
+                                optimize summary                                
+┏━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┓
+┃ iter ┃ status ┃ harness              ┃ f1    ┃ tokens ┃ note                 ┃
+┡━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━┩
+│ 1.c0 │ ok     │ v1_severity_filter_… │ 0.000 │ 0      │ focus=reduce false   │
+│      │        │                      │       │        │ positives without    │
+│      │        │                      │       │        │ losing an            │
+│ 1.c1 │ ★ ok   │ v1_single_shot_c1    │ 0.476 │ 5710   │ focus=lower per-scan │
+│      │        │                      │       │        │ token cost while     │
+│      │        │                      │       │        │ holding              │
+│ 2.c0 │ ★ ok   │ v1_command_injectio… │ 0.000 │ 0      │ focus=reduce false   │
+│      │        │                      │       │        │ positives without    │
+│      │        │                      │       │        │ losing an            │
+│ 2.c1 │ skip   │ v1_post_filter_c1    │ -     │ -      │ import: TypeError:   │
+│      │        │                      │       │        │ LLM.__init__()       │
+│      │        │                      │       │        │ missing 1 required   │
+│      │        │                      │       │        │ positio              │
+└──────┴────────┴──────────────────────┴───────┴────────┴──────────────────────┘
+best_f1 (train): None -> 0.4762 (delta=+0.476) elapsed=173.1s
+final test eval harness=v1_single_shot_c1 train_f1=0.476 -> test_f1=0.667 
+(gap=+0.190, prec=0.75, rec=0.6)

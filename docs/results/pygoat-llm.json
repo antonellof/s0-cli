@@ -1,0 +1,272 @@
+{
+  "version": "0.0.1",
+  "count": 14,
+  "findings": [
+    {
+      "rule_id": "dockerfile.security.missing-user.missing-user",
+      "severity": "high",
+      "path": "Dockerfile",
+      "line": 33,
+      "message": "By not specifying a USER, a program in the container may run as 'root'. This is a security hazard.",
+      "source": "semgrep",
+      "cwe": [
+        "CWE-250"
+      ],
+      "end_line": null,
+      "snippet": "CMD [\"gunicorn\", \"--bind\", \"0.0.0.0:8000\", \"--workers\",\"6\", \"pygoat.wsgi\"]",
+      "confidence": 1.0,
+      "fix_hint": "Specify a non-root user in the Dockerfile using the USER instruction.",
+      "why_real": "Running as root in a container can lead to privilege escalation if an attacker gains access to the container.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "114dcc7a9592a7d1"
+    },
+    {
+      "rule_id": "vibe-hallucinated-import",
+      "severity": "high",
+      "path": "PyGoatBot.py",
+      "line": 1,
+      "message": "Imports 'chatterbot' which is not stdlib, not a local module, and not declared in requirements/pyproject. Likely an AI hallucination \u2014 typosquat risk.",
+      "source": "hallucinated_import",
+      "cwe": [
+        "CWE-1357"
+      ],
+      "end_line": null,
+      "snippet": "from chatterbot import ChatBot",
+      "confidence": 1.0,
+      "fix_hint": "Verify the import and ensure the package is installed and listed in requirements.",
+      "why_real": "The import of 'chatterbot' is suspicious as it is not listed in the requirements, indicating a potential risk of typosquatting.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "17c7257a26208f66"
+    },
+    {
+      "rule_id": "vibe-hallucinated-import",
+      "severity": "high",
+      "path": "PyGoatBot.py",
+      "line": 2,
+      "message": "Imports 'chatterbot' which is not stdlib, not a local module, and not declared in requirements/pyproject. Likely an AI hallucination \u2014 typosquat risk.",
+      "source": "hallucinated_import",
+      "cwe": [
+        "CWE-1357"
+      ],
+      "end_line": null,
+      "snippet": "from chatterbot.logic import BestMatch",
+      "confidence": 1.0,
+      "fix_hint": "Verify the import and ensure the package is installed and listed in requirements.",
+      "why_real": "The import of 'chatterbot' is suspicious as it is not listed in the requirements, indicating a potential risk of typosquatting.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "4b7b30dab08b9698"
+    },
+    {
+      "rule_id": "vibe-hallucinated-import",
+      "severity": "high",
+      "path": "PyGoatBot.py",
+      "line": 3,
+      "message": "Imports 'chatterbot' which is not stdlib, not a local module, and not declared in requirements/pyproject. Likely an AI hallucination \u2014 typosquat risk.",
+      "source": "hallucinated_import",
+      "cwe": [
+        "CWE-1357"
+      ],
+      "end_line": null,
+      "snippet": "from chatterbot.trainers import ListTrainer",
+      "confidence": 1.0,
+      "fix_hint": "Verify the import and ensure the package is installed and listed in requirements.",
+      "why_real": "The import of 'chatterbot' is suspicious as it is not listed in the requirements, indicating a potential risk of typosquatting.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "3fd19d5a905943d1"
+    },
+    {
+      "rule_id": "vibe-unsafe-json-load",
+      "severity": "medium",
+      "path": "challenge/management/commands/populate_challenge.py",
+      "line": 13,
+      "message": "Loading JSON data without validation can lead to security issues if the input is manipulated.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-20"
+      ],
+      "end_line": null,
+      "snippet": "data = json.load(f)",
+      "confidence": 1.0,
+      "fix_hint": "Validate the JSON data structure before processing it.",
+      "why_real": "Loading untrusted JSON data can lead to unexpected behavior or security vulnerabilities if the data is manipulated.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "e073a3a24420b995"
+    },
+    {
+      "rule_id": "vibe-docker-command-injection",
+      "severity": "high",
+      "path": "challenge/views.py",
+      "line": 49,
+      "message": "Docker command constructed from user input, leading to potential command injection.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-78"
+      ],
+      "end_line": null,
+      "snippet": "command = f\"docker run -d -p {port}:{chal.docker_port} {chal.docker_image}\"",
+      "confidence": 1.0,
+      "fix_hint": "Sanitize and validate user input before using it in command execution.",
+      "why_real": "Constructing commands from user input without validation can lead to command injection vulnerabilities.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "8e2dc04e3ae65c29"
+    },
+    {
+      "rule_id": "vibe-unauthenticated-access",
+      "severity": "high",
+      "path": "challenge/views.py",
+      "line": 30,
+      "message": "Auth check that redirects to login but does not prevent unauthorized access to sensitive operations.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-306"
+      ],
+      "end_line": null,
+      "snippet": "return redirect('login')",
+      "confidence": 1.0,
+      "fix_hint": "Implement proper authorization checks to prevent unauthorized access.",
+      "why_real": "Redirecting to login does not prevent unauthorized users from accessing sensitive operations, which is a security risk.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "42c5079f24910df0"
+    },
+    {
+      "rule_id": "vibe-constant-auth-check",
+      "severity": "high",
+      "path": "challenge/views.py",
+      "line": 60,
+      "message": "Chatbot response retrieval does not validate user input against a secure context.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-20"
+      ],
+      "end_line": null,
+      "snippet": "response = chatbot.get_response(question)",
+      "confidence": 1.0,
+      "fix_hint": "Validate user input before processing it to ensure it is safe.",
+      "why_real": "Not validating user input can lead to unexpected behavior or security vulnerabilities.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "c3c3bd88af7546ee"
+    },
+    {
+      "rule_id": "vibe-unsafe-subprocess",
+      "severity": "high",
+      "path": "challenge/views.py",
+      "line": 81,
+      "message": "Subprocess command execution without proper validation, risking command injection.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-78"
+      ],
+      "end_line": null,
+      "snippet": "process = subprocess.Popen(command.split(\" \"), stdout=subprocess.PIPE)",
+      "confidence": 1.0,
+      "fix_hint": "Sanitize and validate user input before using it in subprocess calls.",
+      "why_real": "Executing subprocess commands with unvalidated input can lead to command injection vulnerabilities.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "36f93b8841f4dce8"
+    },
+    {
+      "rule_id": "vibe-pickle-deserialization",
+      "severity": "critical",
+      "path": "dockerized_labs/insec_des_lab/main.py",
+      "line": 36,
+      "message": "Using pickle for deserialization can lead to arbitrary code execution.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-502"
+      ],
+      "end_line": null,
+      "snippet": "user = pickle.loads(decoded_data)",
+      "confidence": 1.0,
+      "fix_hint": "Use a safer serialization format instead of pickle, such as JSON or a custom serialization method.",
+      "why_real": "Pickle is inherently insecure for deserializing untrusted data, leading to potential RCE vulnerabilities.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "c9cdd6262ff92eea"
+    },
+    {
+      "rule_id": "vibe-hardcoded-sensitive-data",
+      "severity": "high",
+      "path": "dockerized_labs/sensitive_data_exposure/dataexposure/models.py",
+      "line": 21,
+      "message": "Storing credit card information in plaintext is a significant security risk.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-922"
+      ],
+      "end_line": null,
+      "snippet": "credit_card = models.CharField(max_length=16)  # probly should encrypt this lol",
+      "confidence": 1.0,
+      "fix_hint": "Encrypt sensitive data such as credit card information before storing it in the database.",
+      "why_real": "Storing sensitive information in plaintext poses a significant risk if the database is compromised.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "6983192b6cad212f"
+    },
+    {
+      "rule_id": "vibe-hardcoded-sensitive-data",
+      "severity": "high",
+      "path": "dockerized_labs/sensitive_data_exposure/dataexposure/models.py",
+      "line": 22,
+      "message": "Storing Social Security Numbers in plaintext is a significant security risk.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-922"
+      ],
+      "end_line": null,
+      "snippet": "ssn = models.CharField(max_length=9)  # this 2, security risk!",
+      "confidence": 1.0,
+      "fix_hint": "Encrypt sensitive data such as Social Security Numbers before storing it in the database.",
+      "why_real": "Storing sensitive information in plaintext poses a significant risk if the database is compromised.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "96e23fe6a7d72a9e"
+    },
+    {
+      "rule_id": "vibe-hardcoded-sensitive-data",
+      "severity": "high",
+      "path": "dockerized_labs/sensitive_data_exposure/dataexposure/models.py",
+      "line": 23,
+      "message": "Storing API keys in plaintext is a significant security risk.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-922"
+      ],
+      "end_line": null,
+      "snippet": "api_key = models.CharField(max_length=32)  # generated on registration",
+      "confidence": 1.0,
+      "fix_hint": "Store API keys securely, using environment variables or a secrets management tool.",
+      "why_real": "Storing sensitive information in plaintext poses a significant risk if the database is compromised.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "3d0870efb0251053"
+    },
+    {
+      "rule_id": "vibe-insecure-endpoints",
+      "severity": "critical",
+      "path": "dockerized_labs/sensitive_data_exposure/dataexposure/urls.py",
+      "line": 24,
+      "message": "Comment admits that endpoints lack proper authorization checks, exposing sensitive data.",
+      "source": "vibe_llm",
+      "cwe": [
+        "CWE-306"
+      ],
+      "end_line": null,
+      "snippet": "# This lab intentionally contains insecure endpoints to demonstrate sensitive data exposure vulnerabilities.",
+      "confidence": 1.0,
+      "fix_hint": "Implement proper authorization checks for all API endpoints to protect sensitive data.",
+      "why_real": "Exposing sensitive data through insecure endpoints is a critical security risk.",
+      "false_positive": false,
+      "raw": {},
+      "fingerprint": "cecbca854998be3f"
+    }
+  ]
+}

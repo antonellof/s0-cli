@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-04-19T15:18:54Z",
+  "runs_total": 3,
+  "frontier_size": 1,
+  "best_f1": 0.4762,
+  "frontier": [
+    {
+      "run_id": "2026-04-19T15-17-59Z__v1_single_shot_c1__3bb0",
+      "harness": "v1_single_shot_c1",
+      "f1": 0.4762,
+      "precision": 0.3846,
+      "recall": 0.625,
+      "tokens": 4451,
+      "turns": 7,
+      "ended_via": null
+    }
+  ]
+}
