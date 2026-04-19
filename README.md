@@ -71,7 +71,14 @@ Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHu
 
 ## Quickstart: optimize the agent
 
-The thing that makes s0-cli different from a plain SAST wrapper is that the scanning agent is a single Python file you can have an LLM rewrite for you, scored against a real labeled benchmark. One command runs the whole [Meta-Harness](https://yoonholee.com/meta-harness/) loop:
+s0-cli ships **two loops** that work together:
+
+| Loop | Command | What it does | When to run it |
+| - | - | - | - |
+| **Inner** (scan) | `s0 scan ./your-repo` | Finds vulnerabilities in your code | every PR, every nightly |
+| **Outer** (optimize) | `s0 optimize -n N` | Makes the *agent itself* smarter against a labeled benchmark | when you want a sharper scanner |
+
+The outer loop doesn't scan your repo — it rewrites the scanning agent (a single Python file under `src/s0_cli/harnesses/`) and scores each rewrite on `bench/tasks_train/`. The improved agent then gets used by the next `s0 scan` you run on your code. This is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach — see the [design section](#optimizing-the-agent-meta-harness) below for the rationale.
 
 ```bash
 # 3 proposer iterations on the training bench, then a held-out test pass
@@ -84,7 +91,9 @@ uv run s0 optimize -n 1 --no-llm
 uv run s0 optimize -n 5 -k 2 --fresh --run-name exp1
 ```
 
-Each iteration writes a new harness file under `src/s0_cli/harnesses/` and a scored run under `runs/`. The session ends with a final pass on `bench/tasks_test/` (the held-out set) so you can see the train→test generalization gap. Full design notes are in [Optimizing the agent](#optimizing-the-agent-meta-harness) below.
+Each iteration writes a new harness file under `src/s0_cli/harnesses/` plus a scored run under `runs/`. The session ends with a final pass on `bench/tasks_test/` (the held-out set) so you can see the train→test generalization gap.
+
+> **Want it tuned to your codebase?** The shipped bench is generic. To make the agent better at *your* repo's specific failure modes, add real vulns from your codebase as new bench tasks — see [Optimize for your own codebase](#optimize-for-your-own-codebase) below.
 
 ## Use it in CI
 
@@ -297,6 +306,91 @@ uv run s0 runs diff <run_a> <run_b>       # side-by-side
 uv run s0 runs grep "<regex>"             # ripgrep across all traces
 uv run s0 runs tail-traces <run_id> <task_id>
 ```
+
+## Optimize for your own codebase
+
+Out of the box, `s0 optimize` improves the agent against the 11 generic tasks shipped under `bench/` (SQL injection, XSS, path traversal, hardcoded secrets, …). That gives you an agent that's good at *common* security bugs. To get one that's good at *your* codebase's specific failure modes, mix in your own labeled tasks — usually drawn from past CVEs, post-mortems, pentest findings, or alerts you've manually triaged.
+
+### Why you can't just point it at a folder
+
+A natural first instinct is `s0 optimize ./my-repo` — let the optimizer chew on a real codebase and "get better over time". It can't, because the optimizer needs to know whether each rewrite of the agent is *better* than the previous one. That requires labels: a `ground_truth.json` that says "these N findings are real, anything else is noise". Without labels every change is unfalsifiable — F1 is undefined and the loop has no signal to climb. Pointing the optimizer at raw source would be like training a model with no loss function.
+
+The good news: **a tiny amount of labeled data goes a long way.** 3–5 in-house tasks are enough to start biasing the agent toward your stack.
+
+### Add a real vulnerability as a bench task
+
+Each task is two files: a `target/` directory holding the offending source, and a `ground_truth.json` listing the expected findings. Bootstrap from a known issue in your repo:
+
+```bash
+# 1. Copy the offending file(s) into a new task directory
+mkdir -p bench/tasks_train/myco_sqli_001/target
+cp ./your-repo/api/users.py bench/tasks_train/myco_sqli_001/target/
+
+# 2. Write the label (one entry per ground-truth finding)
+cat > bench/tasks_train/myco_sqli_001/ground_truth.json <<'EOF'
+[
+  {
+    "rule_id": "sqli-fstring",
+    "severity": "critical",
+    "path": "target/users.py",
+    "line": 42,
+    "cwe": ["CWE-89"],
+    "note": "f-string user_id into cur.execute"
+  }
+]
+EOF
+
+# 3. Sanity-check that the deterministic scanners can at least see it
+uv run s0 eval --only myco_sqli_001 --no-llm
+
+# 4. Re-run the optimizer; the proposer is now scored on your task too
+uv run s0 optimize -n 5
+
+# 5. Use the resulting (improved) harness in CI on the full repo
+uv run s0 scan ./your-repo --fail-on high
+```
+
+The matcher is forgiving: a prediction matches a label if `path` is identical and `|line - gt.line| <= 5`, so you don't have to be exact on line numbers. Severity isn't matched on; it's scored separately. The full task format (multi-file targets, optional task README, etc.) is documented in [`bench/README.md`](bench/README.md).
+
+### Continuous-improvement loop
+
+Once you have one in-house task the loop closes:
+
+```
+   real vulns      ──add as bench task──▶  bench/tasks_train/<myco_xxx>/
+   ─────────────                                       │
+   • post-mortems                                      │ s0 optimize -n N
+   • pentest reports                                   ▼
+   • dismissed alerts                       src/s0_cli/harnesses/<new>.py
+   • prod incidents                                    │
+        ▲                                              │ s0 scan ./your-repo (CI)
+        │                                              ▼
+        │                                       findings on prod code
+        │                                              │
+        └──── any confirmed miss / verified FP ────────┘
+                  (promote to a new bench task)
+```
+
+Every confirmed miss or verified false positive in production becomes a new training task. Over months your bench grows, and the agent gets sharper at the failure modes that actually appear in your stack — *that* is the "security improvements over time" loop, and it's powered by labels rather than by pointing at a folder.
+
+### How many tasks do I need?
+
+| In-house tasks | What you get |
+| - | - |
+| 0 | a general agent (the shipped baseline) |
+| 1–3 | the proposer notices your task class and biases toward it |
+| 5–10 | meaningful tilt toward your codebase's vuln distribution |
+| 20+ | diminishing returns; consider moving 20–30% into `tasks_test/` to measure your-repo generalization |
+
+Mix your tasks with the shipped ones — never replace them, or the optimizer will overfit your distribution and lose general competence.
+
+### Tips
+
+- **Sources of labels.** Past CVEs in your dependency tree, post-mortems, internal pentest reports, the security-team backlog, alerts you've already triaged in `runs/` (use `s0 runs grep` to find them).
+- **Keep tasks small.** A few hundred lines of source per `target/`, not the whole module. The harness only needs enough context to triage one finding correctly.
+- **Redact secrets.** `target/` is committed to git. If you're labeling a leaked-credential bug, replace the secret with `EXAMPLE_REDACTED` before committing — the scanners care about the *shape*, not the value.
+- **Hold some out.** As you accumulate tasks, move 20–30% into `bench/tasks_test/` so generalization is measured, not assumed. The optimizer is sandboxed from `tasks_test/` automatically.
+- **Privacy.** If you can't put real source in the repo, keep your `bench/tasks_train/myco_*/` directory outside git and point `s0 optimize` at it: `uv run s0 optimize -n 5 --bench /path/to/private-bench`.
 
 ## How the LLM is used
 
