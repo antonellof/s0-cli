@@ -1,0 +1,63 @@
+[project]
+name = "s0-cli"
+version = "0.0.1"
+description = "Security-Zero CLI: a Meta-Harness-shaped agent for scanning code for security and vibe-code issues."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "s0-cli contributors" }]
+keywords = ["security", "sast", "llm", "agent", "meta-harness", "vibe-code"]
+
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "litellm>=1.50",
+    "tenacity>=8.3",
+    "unidiff>=0.7.5",
+    "pyyaml>=6.0",
+    "jsonschema>=4.22",
+    "rank-bm25>=0.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+s0 = "s0_cli.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/s0_cli"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/s0_cli/prompts" = "s0_cli/prompts"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S"]
+ignore = [
+    "S101",
+    "S603",
+    "S607",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B"]
+"bench/**" = ["S", "B", "F", "E"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]

@@ -1,0 +1,136 @@
+"""Scanner protocol and the normalized `Finding` shape.
+
+`Finding` is the universal currency of the system: every scanner emits them,
+every reporter consumes them, the agent triages them, the evaluator scores
+them against ground truth, and the run-store archives them.
+
+Stable across phases. Add fields with defaults; do not rename or remove.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any, Literal, Protocol, runtime_checkable
+
+Severity = Literal["info", "low", "medium", "high", "critical"]
+
+
+@dataclass(frozen=True)
+class Finding:
+    """One security finding, normalized across scanners.
+
+    Fields:
+        rule_id:    scanner-native rule identifier (e.g. "B602", "python.lang.security.audit.eval-detected").
+        cwe:        CWE identifier(s) when known. Empty if scanner did not provide.
+        severity:   one of info|low|medium|high|critical (mapped from scanner-native scale).
+        path:       absolute or workspace-relative file path.
+        line:       1-indexed line number of the primary location. 0 if not line-bound.
+        end_line:   inclusive end of range; equals `line` for single-line findings.
+        message:    short human-readable description.
+        snippet:    a few lines of source around the finding (None if not extracted).
+        source:     scanner name (e.g. "semgrep", "bandit", "llm:vibe-stub-auth").
+        confidence: 0.0-1.0; scanners default to 1.0, the LLM triager may lower it.
+        fix_hint:   optional suggested fix (LLM triager fills this in).
+        why_real:   optional one-line justification (LLM triager fills this in).
+        false_positive: True if the LLM triager (or a Phase 1 harness) marked it.
+        raw:        scanner's original emission, for debugging.
+    """
+
+    rule_id: str
+    severity: Severity
+    path: str
+    line: int
+    message: str
+    source: str
+    cwe: tuple[str, ...] = ()
+    end_line: int | None = None
+    snippet: str | None = None
+    confidence: float = 1.0
+    fix_hint: str | None = None
+    why_real: str | None = None
+    false_positive: bool = False
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    def fingerprint(self) -> str:
+        """Stable hash for dedup across scanners and across runs.
+
+        Intentionally ignores `message`, `confidence`, `raw`, and the LLM-added
+        fields, so the same underlying issue from semgrep + bandit collapses to
+        one fingerprint. Snippet is normalized (whitespace-stripped, lowercased)
+        before hashing so cosmetic line changes don't fork the fingerprint.
+        """
+        norm_path = _normalize_path(self.path)
+        norm_snippet = _normalize_snippet(self.snippet) if self.snippet else ""
+        rule_family = _rule_family(self.rule_id)
+        key = f"{rule_family}|{norm_path}|{self.line}|{norm_snippet}".encode()
+        return hashlib.sha256(key).hexdigest()[:16]
+
+    def to_dict(self) -> dict[str, Any]:
+        d = asdict(self)
+        d["fingerprint"] = self.fingerprint()
+        d["cwe"] = list(self.cwe)
+        return d
+
+
+def _normalize_path(p: str) -> str:
+    return str(Path(p)).replace("\\", "/")
+
+
+_SNIPPET_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_snippet(s: str) -> str:
+    return _SNIPPET_WS_RE.sub(" ", s.strip()).lower()
+
+
+_RULE_FAMILY_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _rule_family(rule_id: str) -> str:
+    """Map scanner-specific rule IDs to a coarse family for dedup.
+
+    e.g. "python.lang.security.audit.dangerous-eval" and "B307" both contain
+    "eval"; we extract the dominant token. This is a heuristic; the LLM triager
+    can override dedup decisions.
+    """
+    parts = [p for p in _RULE_FAMILY_RE.split(rule_id.lower()) if p]
+    sec_keywords = {
+        "eval", "exec", "sql", "xss", "csrf", "ssrf", "rce", "lfi", "rfi",
+        "deserialization", "pickle", "yaml", "shell", "subprocess", "secret",
+        "credential", "password", "jwt", "auth", "crypto", "md5", "sha1",
+        "random", "ssl", "tls", "redirect", "open", "path", "traversal",
+        "injection", "cmd", "command", "ldap", "xpath", "xxe",
+    }
+    for p in parts:
+        if p in sec_keywords:
+            return p
+    return parts[-1] if parts else rule_id.lower()
+
+
+@runtime_checkable
+class Scanner(Protocol):
+    """Implement this to add a new detector.
+
+    Scanners are stateless; a fresh instance is constructed per scan.
+    """
+
+    name: str
+
+    def is_available(self) -> bool:
+        """Quick check (e.g. shutil.which or `--version`) used by `s0 doctor`."""
+        ...
+
+    def run(self, target: "Target") -> list[Finding]:  # noqa: F821 (forward ref)
+        """Run the scanner synchronously and return normalized findings.
+
+        Must not raise on a clean target; return [] instead. Errors that
+        prevent execution should raise `ScannerError`.
+        """
+        ...
+
+
+class ScannerError(RuntimeError):
+    """Raised when a scanner cannot run (binary missing, target invalid, etc.)."""
