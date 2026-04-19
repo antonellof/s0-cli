@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "sql-injection-fstring",
+    "severity": "critical",
+    "path": "app.py",
+    "line": 15,
+    "cwe": ["CWE-89"],
+    "note": "f-string interpolation of request param into SQL query, then execute"
+  }
+]

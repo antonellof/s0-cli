@@ -1,0 +1,27 @@
+{
+  "results": [
+    {
+      "check_id": "python.lang.security.audit.dangerous-system-call",
+      "path": "app.py",
+      "start": {"line": 15, "col": 5},
+      "end": {"line": 15, "col": 60},
+      "extra": {
+        "severity": "ERROR",
+        "message": "Detected unsafe SQL execution with formatted string.",
+        "lines": "    cur.execute(f\"SELECT * FROM users WHERE id = {user_id}\")",
+        "metadata": {"cwe": ["CWE-89: SQL Injection"]}
+      }
+    },
+    {
+      "check_id": "python.lang.security.audit.hardcoded-secret",
+      "path": "config.py",
+      "start": {"line": 5, "col": 1},
+      "end": {"line": 5, "col": 80},
+      "extra": {
+        "severity": "WARNING",
+        "message": "Hardcoded API key detected.",
+        "lines": "STRIPE_API_KEY = \"sk_live_4eC39HqLyjWDarjtT1zdp7dc1234567890ABCD\""
+      }
+    }
+  ]
+}

@@ -13,7 +13,10 @@ import hashlib
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from s0_cli.targets.base import Target
 
 Severity = Literal["info", "low", "medium", "high", "critical"]
 
@@ -57,15 +60,19 @@ class Finding:
     def fingerprint(self) -> str:
         """Stable hash for dedup across scanners and across runs.
 
-        Intentionally ignores `message`, `confidence`, `raw`, and the LLM-added
-        fields, so the same underlying issue from semgrep + bandit collapses to
-        one fingerprint. Snippet is normalized (whitespace-stripped, lowercased)
-        before hashing so cosmetic line changes don't fork the fingerprint.
+        When a snippet is available, fingerprint = (path, line, normalized snippet) —
+        this collapses the same code location flagged by different scanners to a
+        single identity (e.g. semgrep + bandit both flagging an `execute(f"...")`).
+
+        When no snippet is available, fall back to (path, line, rule family),
+        which uses a coarse keyword extraction so semgrep's verbose IDs and
+        bandit's terse IDs land in the same bucket for known categories.
         """
         norm_path = _normalize_path(self.path)
-        norm_snippet = _normalize_snippet(self.snippet) if self.snippet else ""
-        rule_family = _rule_family(self.rule_id)
-        key = f"{rule_family}|{norm_path}|{self.line}|{norm_snippet}".encode()
+        if self.snippet:
+            key = f"{norm_path}|{self.line}|{_normalize_snippet(self.snippet)}".encode()
+        else:
+            key = f"{norm_path}|{self.line}|{_rule_family(self.rule_id)}".encode()
         return hashlib.sha256(key).hexdigest()[:16]
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,7 +130,7 @@ class Scanner(Protocol):
         """Quick check (e.g. shutil.which or `--version`) used by `s0 doctor`."""
         ...
 
-    def run(self, target: "Target") -> list[Finding]:  # noqa: F821 (forward ref)
+    def run(self, target: Target) -> list[Finding]:
         """Run the scanner synchronously and return normalized findings.
 
         Must not raise on a clean target; return [] instead. Errors that

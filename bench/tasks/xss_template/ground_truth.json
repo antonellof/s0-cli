@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "xss-flask-fstring-html",
+    "severity": "high",
+    "path": "views.py",
+    "line": 11,
+    "cwe": ["CWE-79"],
+    "note": "Unescaped request param interpolated into HTML response"
+  }
+]

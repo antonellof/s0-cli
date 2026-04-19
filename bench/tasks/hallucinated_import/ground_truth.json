@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "vibe-hallucinated-import",
+    "severity": "high",
+    "path": "main.py",
+    "line": 7,
+    "cwe": ["CWE-1357"],
+    "note": "Imports 'safe_json' which is neither stdlib nor in requirements.txt; classic LLM hallucination, typosquat risk."
+  }
+]

@@ -1,0 +1,2 @@
+# note: safe_json is NOT listed here — it's a hallucinated import
+requests==2.32.0

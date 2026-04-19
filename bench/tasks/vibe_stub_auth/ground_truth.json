@@ -1,0 +1,18 @@
+[
+  {
+    "rule_id": "vibe-stub-auth-hardcoded-admin",
+    "severity": "critical",
+    "path": "auth.py",
+    "line": 22,
+    "cwe": ["CWE-798", "CWE-287"],
+    "note": "Hardcoded admin/admin123 backdoor in login()"
+  },
+  {
+    "rule_id": "vibe-stub-auth-string-compare",
+    "severity": "high",
+    "path": "auth.py",
+    "line": 30,
+    "cwe": ["CWE-287"],
+    "note": "is_authorized just compares string == 'admin'"
+  }
+]

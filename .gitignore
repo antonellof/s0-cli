@@ -46,3 +46,4 @@ runs/
 
 # Cached scanner output (debug)
 .s0-cache/
+.commit-msg.tmp

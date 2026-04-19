@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "hardcoded-secret-stripe",
+    "severity": "high",
+    "path": "config.py",
+    "line": 5,
+    "cwe": ["CWE-798"],
+    "note": "Stripe live API key embedded in source"
+  }
+]
