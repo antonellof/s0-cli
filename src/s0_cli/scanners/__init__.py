@@ -1,7 +1,8 @@
 """Scanner integrations.
 
-Each scanner is a small adapter that runs an external tool (or, in Phase 3, an
-LLM-only detector) and yields normalized `Finding` objects.
+Each scanner is a small adapter that runs an external tool (or an LLM-only
+detector) and yields normalized `Finding` objects. The registry mixes both
+kinds — the agent loop doesn't care which is which.
 
 Adding a new scanner is one file: implement the `Scanner` protocol and register
 it in `REGISTRY` below.

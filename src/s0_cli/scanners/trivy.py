@@ -3,9 +3,9 @@
 Runs `trivy fs --format json --quiet --scanners vuln,secret,misconfig <target>`
 and normalizes Vulnerabilities, Secrets, and Misconfigurations into Findings.
 
-Trivy can also scan container images and git repos, but Phase 2 only wires up
-the filesystem scanner — the same one a developer would run pre-commit on a
-checked-out source tree.
+Trivy can also scan container images and git repos; we deliberately wire up
+only the filesystem scanner — the same one a developer would run pre-commit
+on a checked-out source tree.
 """
 
 from __future__ import annotations

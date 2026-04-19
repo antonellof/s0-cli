@@ -1,7 +1,7 @@
 """Run-store reader/writer.
 
-The proposer (Phase 1) and the human-facing `s0 runs` CLI both read from this
-module. Keep the schema stable; add fields, don't rename.
+The optimizer's proposer agent and the human-facing `s0 runs` CLI both read
+from this module. Keep the schema stable; add fields, don't rename.
 """
 
 from __future__ import annotations

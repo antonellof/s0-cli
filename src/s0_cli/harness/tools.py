@@ -2,14 +2,14 @@
 
 Two reasons this layer is centralized rather than inlined into each harness:
 
-1. The Phase-1 outer loop (Meta-Harness proposer) needs a bounded action
-   space to search over. If every harness can spawn arbitrary subprocesses,
-   the search is unsafe and irreproducible.
+1. The outer Meta-Harness loop (`s0 optimize`) needs a bounded action space
+   to search over. If every harness could spawn arbitrary subprocesses, the
+   search would be unsafe and irreproducible.
 2. Every tool call is recorded into the trace by the agent loop, which
    gives the proposer high-quality diagnostic data (paper Table 3).
 
-Tools are READ-ONLY against the target. Adding a write tool requires a
-separate review path (Phase 5: `s0 fix`).
+Tools are READ-ONLY against the target. Adding a write tool would require a
+separate review path (e.g. an autofix command).
 """
 
 from __future__ import annotations

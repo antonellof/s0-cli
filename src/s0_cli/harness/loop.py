@@ -202,7 +202,7 @@ def _summarize_history(
 
     Cheap heuristic, not an LLM call: keep system, first user, last 4 messages,
     drop everything else. The paper's full version uses an LLM summarizer; this
-    is enough for Phase 0 and reduces another round-trip.
+    is good enough in practice and avoids another round-trip.
     """
     if len(messages) <= 6:
         return messages

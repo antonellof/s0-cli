@@ -11,7 +11,8 @@ Insufficiently Trustworthy Component) because typosquatters scrape
 LLM hallucinations and register the bogus package names on PyPI.
 
 This scanner is intentionally mechanical — fast, deterministic, no
-network. The Phase 3 `VibeLLMScanner` covers the squishier patterns.
+network. The companion `VibeLLMScanner` covers the squishier patterns
+(stub auth, dummy crypto, hardcoded backdoors) that need an LLM.
 """
 
 from __future__ import annotations

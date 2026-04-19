@@ -38,7 +38,7 @@ class Finding:
         confidence: 0.0-1.0; scanners default to 1.0, the LLM triager may lower it.
         fix_hint:   optional suggested fix (LLM triager fills this in).
         why_real:   optional one-line justification (LLM triager fills this in).
-        false_positive: True if the LLM triager (or a Phase 1 harness) marked it.
+        false_positive: True if the LLM triager (or a downstream harness) marked it.
         raw:        scanner's original emission, for debugging.
     """
 

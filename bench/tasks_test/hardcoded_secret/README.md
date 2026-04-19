@@ -1,3 +1,6 @@
 # hardcoded_secret
 
-Tests detection of secrets in source. semgrep auto-config catches this; in Phase 2, gitleaks will too. The harness should NOT also flag the postgres URL (it's a non-secret default credential string).
+Held-out test task. Tests detection of secrets in source. Both semgrep
+(auto config) and gitleaks should catch the AWS key. The harness should
+NOT also flag the postgres URL (it's a non-secret default credential
+string used as a config placeholder, CWE-798 doesn't apply).
