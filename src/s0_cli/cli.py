@@ -283,6 +283,16 @@ def cmd_optimize(
         "--run-name",
         help="Isolate this session under runs/<run-name>/. Combine with --fresh for a clean slate.",
     ),
+    candidates: int = typer.Option(
+        1,
+        "--candidates",
+        "-k",
+        help=(
+            "Parallel proposals per iteration (default 1). With -k N, each iteration fans "
+            "out N proposers with diverse temperature/seed/focus and keeps the highest-F1 winner. "
+            "Cost scales linearly with N."
+        ),
+    ),
 ) -> None:
     """Outer Meta-Harness loop: propose -> validate -> eval, repeated.
 
@@ -330,6 +340,7 @@ def cmd_optimize(
         console=console,
         fresh=fresh,
         run_name=run_name,
+        candidates=candidates,
     )
 
 

@@ -41,6 +41,7 @@ class Proposer:
         max_turns: int = 25,
         token_budget: int = 250_000,
         no_llm: bool = False,
+        temperature: float | None = None,
     ):
         self.runs_dir = runs_dir
         self.harnesses_dir = harnesses_dir
@@ -51,12 +52,17 @@ class Proposer:
         settings = get_settings()
         self.llm = LLM(
             model=settings.model,
-            temperature=settings.temperature,
+            temperature=settings.temperature if temperature is None else temperature,
             request_timeout_sec=settings.request_timeout_sec,
             no_llm=no_llm,
         )
 
-    async def propose(self, context: OptimizerContext) -> ProposerOutput:
+    async def propose(
+        self,
+        context: OptimizerContext,
+        *,
+        directive: str | None = None,
+    ) -> ProposerOutput:
         ctx = ProposerToolContext(
             runs_dir=self.runs_dir,
             harnesses_dir=self.harnesses_dir,
@@ -75,6 +81,8 @@ class Proposer:
             "Diagnose the most impactful failure mode in prior runs and ship a small, "
             "additive new harness. Pick a name, write the file, then call finish."
         )
+        if directive:
+            user_prompt = f"{directive}\n\n{user_prompt}"
 
         loop_result = await agent_loop(
             llm=self.llm,

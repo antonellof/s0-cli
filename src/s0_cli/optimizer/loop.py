@@ -19,18 +19,39 @@ from s0_cli.eval.runner import EvalRunner, load_harness_from_path
 from s0_cli.eval.validate import validate_harness
 from s0_cli.optimizer.context import build_context, write_frontier
 from s0_cli.optimizer.proposer import Proposer, ProposerOutput
+from s0_cli.optimizer.strategies import CandidateStrategy, build_strategies
 from s0_cli.runs.store import RunStore
+
+
+@dataclass
+class CandidateAttempt:
+    """One proposer-+-eval attempt within a multi-candidate iteration."""
+
+    slot: int
+    label: str
+    temperature: float
+    seed_hint: str
+    focus: str
+    proposed_path: str | None
+    success: bool
+    skip_reason: str | None = None
+    eval_summary: dict[str, Any] | None = None
+    proposer_summary: str | None = None
+    proposer_usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class IterationResult:
     iteration: int
     proposed_path: str | None
-    success: bool  # proposer wrote a file AND validator passed AND eval ran
+    success: bool  # the *winning* candidate succeeded (file + validator + eval)
     skip_reason: str | None = None
     eval_summary: dict[str, Any] | None = None
     proposer_summary: str | None = None
     proposer_usage: dict[str, Any] = field(default_factory=dict)
+    # Populated when --candidates > 1; otherwise a single-element list mirroring the iteration.
+    candidates: list[CandidateAttempt] = field(default_factory=list)
+    winning_slot: int | None = None
 
 
 @dataclass
@@ -73,9 +94,13 @@ async def run_optimizer(
     test_bench_dir: Path | None = None,
     fresh: bool = False,
     run_name: str | None = None,
+    candidates: int = 1,
 ) -> OptimizerResult:
     console = console or Console()
     started = time.monotonic()
+
+    if candidates < 1:
+        raise ValueError(f"candidates must be >= 1, got {candidates}")
 
     if run_name is not None:
         if "/" in run_name or run_name.startswith("."):
@@ -109,19 +134,17 @@ async def run_optimizer(
     initial_ctx = build_context(runs_dir, skill_md_path)
     best_before = initial_ctx.best_f1
 
-    proposer = Proposer(
-        runs_dir=runs_dir,
-        harnesses_dir=harnesses_dir,
-        prompts_dir=prompts_dir,
-        max_turns=max_proposer_turns,
-        no_llm=no_llm,
-    )
-
     settings = get_settings()
     store = RunStore(runs_dir)
     eval_runner = EvalRunner(bench_root=bench_dir, store=store)
 
     iterations_log: list[IterationResult] = []
+    strategies = build_strategies(candidates)
+    if candidates > 1:
+        console.print(
+            f"[dim]multi-candidate mode:[/dim] {candidates} parallel proposals/iter "
+            f"(temps={[s.temperature for s in strategies]})"
+        )
 
     # Graceful shutdown: first Ctrl+C asks for an early exit at the next
     # iteration boundary, persisting current results + frontier. A second
@@ -155,93 +178,21 @@ async def run_optimizer(
             f"frontier={ctx.pareto_ids[:4]}, best_f1={ctx.best_f1}"
         )
 
-        proposer_out: ProposerOutput = await proposer.propose(ctx)
-        console.print(
-            f"proposer: ended={proposer_out.ended_via} "
-            f"wrote={proposer_out.harness_path} "
-            f"summary={proposer_out.finish_summary[:160]!r}"
+        iter_result = await _run_iteration_candidates(
+            iteration=i,
+            strategies=strategies,
+            context=ctx,
+            runs_dir=runs_dir,
+            harnesses_dir=harnesses_dir,
+            prompts_dir=prompts_dir,
+            max_proposer_turns=max_proposer_turns,
+            no_llm=no_llm,
+            only_tasks=only_tasks,
+            eval_runner=eval_runner,
+            settings_model=settings.model,
+            console=console,
         )
-
-        if not proposer_out.success or proposer_out.harness_path is None:
-            iterations_log.append(
-                IterationResult(
-                    iteration=i,
-                    proposed_path=str(proposer_out.harness_path) if proposer_out.harness_path else None,
-                    success=False,
-                    skip_reason="proposer did not call finish or wrote no harness",
-                    proposer_summary=proposer_out.finish_summary,
-                    proposer_usage=proposer_out.usage,
-                )
-            )
-            continue
-
-        report = validate_harness(proposer_out.harness_path)
-        if not report.ok:
-            console.print(f"[red]validator rejected:[/red] {report.errors}")
-            iterations_log.append(
-                IterationResult(
-                    iteration=i,
-                    proposed_path=str(proposer_out.harness_path),
-                    success=False,
-                    skip_reason=f"validator: {'; '.join(report.errors)}",
-                    proposer_summary=proposer_out.finish_summary,
-                    proposer_usage=proposer_out.usage,
-                )
-            )
-            continue
-
-        harness_name = proposer_out.harness_path.stem
-        try:
-            harness = load_harness_from_path(proposer_out.harness_path)
-            if no_llm and hasattr(harness, "with_no_llm"):
-                harness.with_no_llm()
-        except Exception as e:
-            console.print(f"[red]import failed:[/red] {e}")
-            iterations_log.append(
-                IterationResult(
-                    iteration=i,
-                    proposed_path=str(proposer_out.harness_path),
-                    success=False,
-                    skip_reason=f"import: {type(e).__name__}: {e}",
-                    proposer_summary=proposer_out.finish_summary,
-                    proposer_usage=proposer_out.usage,
-                )
-            )
-            continue
-
-        console.print(f"running eval on harness={harness_name}")
-        summary = await eval_runner.run(
-            harness,
-            only=only_tasks,
-            invocation=f"s0 optimize iter={i} harness={harness_name}",
-            config_extra={
-                "model": settings.model,
-                "no_llm": no_llm,
-                "from_optimizer": True,
-                "iteration": i,
-                "proposer_summary": proposer_out.finish_summary,
-            },
-        )
-
-        agg = summary.aggregate
-        console.print(
-            f"[green]eval:[/green] f1={agg.get('f1')} "
-            f"prec={agg.get('precision')} rec={agg.get('recall')} "
-            f"tokens={agg.get('input_tokens', 0) + agg.get('output_tokens', 0)}"
-        )
-
-        iterations_log.append(
-            IterationResult(
-                iteration=i,
-                proposed_path=str(proposer_out.harness_path),
-                success=True,
-                eval_summary={"aggregate": agg, "tasks": [
-                    {"task_id": t.task_id, **t.score} for t in summary.tasks
-                ]},
-                proposer_summary=proposer_out.finish_summary,
-                proposer_usage=proposer_out.usage,
-            )
-        )
+        iterations_log.append(iter_result)
 
         try:
             frontier_path = write_frontier(runs_dir)
@@ -277,6 +228,246 @@ async def run_optimizer(
         elapsed_sec=elapsed,
         test_eval=test_eval,
     )
+
+
+async def _run_one_candidate(
+    *,
+    iteration: int,
+    strategy: CandidateStrategy,
+    context,
+    runs_dir: Path,
+    harnesses_dir: Path,
+    prompts_dir: Path,
+    max_proposer_turns: int,
+    no_llm: bool,
+    only_tasks: list[str] | None,
+    eval_runner: EvalRunner,
+    settings_model: str,
+    console: Console,
+) -> CandidateAttempt:
+    """Run one (propose -> validate -> import -> eval) attempt for one strategy.
+
+    Returns a ``CandidateAttempt`` describing the outcome. Never raises;
+    failures are recorded in ``skip_reason`` so a single bad slot does not
+    poison sibling candidates running concurrently.
+    """
+    proposer = Proposer(
+        runs_dir=runs_dir,
+        harnesses_dir=harnesses_dir,
+        prompts_dir=prompts_dir,
+        max_turns=max_proposer_turns,
+        no_llm=no_llm,
+        temperature=strategy.temperature,
+    )
+
+    base = CandidateAttempt(
+        slot=strategy.slot,
+        label=strategy.label,
+        temperature=strategy.temperature,
+        seed_hint=strategy.seed_hint,
+        focus=strategy.focus,
+        proposed_path=None,
+        success=False,
+    )
+
+    try:
+        proposer_out: ProposerOutput = await proposer.propose(
+            context, directive=strategy.directive()
+        )
+    except Exception as e:
+        console.print(f"[red]{strategy.label} proposer crashed:[/red] {e}")
+        base.skip_reason = f"proposer crash: {type(e).__name__}: {e}"
+        return base
+
+    base.proposer_summary = proposer_out.finish_summary
+    base.proposer_usage = proposer_out.usage
+    if proposer_out.harness_path is not None:
+        base.proposed_path = str(proposer_out.harness_path)
+
+    if not proposer_out.success or proposer_out.harness_path is None:
+        base.skip_reason = "proposer did not call finish or wrote no harness"
+        return base
+
+    report = validate_harness(proposer_out.harness_path)
+    if not report.ok:
+        console.print(
+            f"[red]{strategy.label} validator rejected:[/red] {report.errors}"
+        )
+        base.skip_reason = f"validator: {'; '.join(report.errors)}"
+        return base
+
+    try:
+        harness = load_harness_from_path(proposer_out.harness_path)
+        if no_llm and hasattr(harness, "with_no_llm"):
+            harness.with_no_llm()
+    except Exception as e:
+        console.print(f"[red]{strategy.label} import failed:[/red] {e}")
+        base.skip_reason = f"import: {type(e).__name__}: {e}"
+        return base
+
+    harness_name = proposer_out.harness_path.stem
+    console.print(
+        f"[cyan]{strategy.label}[/cyan] running eval on harness={harness_name}"
+    )
+    try:
+        summary = await eval_runner.run(
+            harness,
+            only=only_tasks,
+            invocation=(
+                f"s0 optimize iter={iteration} slot={strategy.label} "
+                f"harness={harness_name}"
+            ),
+            config_extra={
+                "model": settings_model,
+                "no_llm": no_llm,
+                "from_optimizer": True,
+                "iteration": iteration,
+                "candidate_slot": strategy.slot,
+                "candidate_label": strategy.label,
+                "candidate_temperature": strategy.temperature,
+                "candidate_focus": strategy.focus,
+                "candidate_seed_hint": strategy.seed_hint,
+                "proposer_summary": proposer_out.finish_summary,
+            },
+        )
+    except Exception as e:
+        console.print(f"[red]{strategy.label} eval crashed:[/red] {e}")
+        base.skip_reason = f"eval crash: {type(e).__name__}: {e}"
+        return base
+
+    agg = summary.aggregate
+    console.print(
+        f"[green]{strategy.label} eval:[/green] f1={agg.get('f1')} "
+        f"prec={agg.get('precision')} rec={agg.get('recall')} "
+        f"tokens={agg.get('input_tokens', 0) + agg.get('output_tokens', 0)}"
+    )
+    base.success = True
+    base.eval_summary = {
+        "aggregate": agg,
+        "tasks": [{"task_id": t.task_id, **t.score} for t in summary.tasks],
+    }
+    return base
+
+
+async def _run_iteration_candidates(
+    *,
+    iteration: int,
+    strategies: list[CandidateStrategy],
+    context,
+    runs_dir: Path,
+    harnesses_dir: Path,
+    prompts_dir: Path,
+    max_proposer_turns: int,
+    no_llm: bool,
+    only_tasks: list[str] | None,
+    eval_runner: EvalRunner,
+    settings_model: str,
+    console: Console,
+) -> IterationResult:
+    """Fan out N candidate strategies, evaluate each, and return the winner.
+
+    Concurrency: when N>1 we ``asyncio.gather`` all candidates so the wall-
+    clock cost is roughly one candidate's, not N. The OpenAI/Anthropic SDKs
+    handle parallel HTTP calls fine; the local validator + scanners are CPU-
+    cheap enough not to need bounded parallelism at this scale.
+
+    Winner picking: highest F1 among ``success=True`` candidates, ties broken
+    by lowest token usage (Pareto-aware). All non-winning candidates are
+    still recorded in ``IterationResult.candidates`` so the user can see what
+    each design slot produced.
+    """
+    if len(strategies) == 1:
+        attempts = [
+            await _run_one_candidate(
+                iteration=iteration,
+                strategy=strategies[0],
+                context=context,
+                runs_dir=runs_dir,
+                harnesses_dir=harnesses_dir,
+                prompts_dir=prompts_dir,
+                max_proposer_turns=max_proposer_turns,
+                no_llm=no_llm,
+                only_tasks=only_tasks,
+                eval_runner=eval_runner,
+                settings_model=settings_model,
+                console=console,
+            )
+        ]
+    else:
+        coros = [
+            _run_one_candidate(
+                iteration=iteration,
+                strategy=s,
+                context=context,
+                runs_dir=runs_dir,
+                harnesses_dir=harnesses_dir,
+                prompts_dir=prompts_dir,
+                max_proposer_turns=max_proposer_turns,
+                no_llm=no_llm,
+                only_tasks=only_tasks,
+                eval_runner=eval_runner,
+                settings_model=settings_model,
+                console=console,
+            )
+            for s in strategies
+        ]
+        attempts = await asyncio.gather(*coros)
+
+    winner = _pick_winner(attempts)
+
+    if winner is None:
+        # Every slot failed. Surface the most informative failure as the iteration's reason.
+        first = attempts[0]
+        return IterationResult(
+            iteration=iteration,
+            proposed_path=first.proposed_path,
+            success=False,
+            skip_reason=(
+                f"all {len(attempts)} candidate(s) failed; first reason: "
+                f"{first.skip_reason or 'unknown'}"
+            ),
+            proposer_summary=first.proposer_summary,
+            proposer_usage=first.proposer_usage,
+            candidates=attempts,
+        )
+
+    if len(attempts) > 1:
+        ranking = ", ".join(
+            f"{a.label}=f1:{(a.eval_summary or {}).get('aggregate', {}).get('f1', 0.0):.3f}"
+            if a.success
+            else f"{a.label}=skip"
+            for a in attempts
+        )
+        console.print(
+            f"[bold magenta]iter {iteration} winner:[/bold magenta] "
+            f"{winner.label} ({ranking})"
+        )
+
+    return IterationResult(
+        iteration=iteration,
+        proposed_path=winner.proposed_path,
+        success=True,
+        eval_summary=winner.eval_summary,
+        proposer_summary=winner.proposer_summary,
+        proposer_usage=winner.proposer_usage,
+        candidates=attempts,
+        winning_slot=winner.slot,
+    )
+
+
+def _pick_winner(attempts: list[CandidateAttempt]) -> CandidateAttempt | None:
+    """Highest F1 wins; ties broken by fewest tokens (Pareto preference)."""
+    best: tuple[float, int, CandidateAttempt] | None = None
+    for a in attempts:
+        if not a.success or not a.eval_summary:
+            continue
+        agg = a.eval_summary.get("aggregate") or {}
+        f1 = float(agg.get("f1", 0.0) or 0.0)
+        toks = int(agg.get("input_tokens", 0) or 0) + int(agg.get("output_tokens", 0) or 0)
+        cand = (f1, -toks, a)
+        if best is None or cand > best:
+            best = cand
+    return best[2] if best else None
 
 
 async def _run_final_test_eval(
@@ -396,6 +587,40 @@ def _print_summary(
     table.add_column("note")
 
     for it in iterations:
+        # Multi-candidate iterations get one row per candidate, plus a header row marking the winner.
+        if len(it.candidates) > 1:
+            for a in sorted(it.candidates, key=lambda x: x.slot):
+                marker = (
+                    "[bold green]★ ok[/bold green]"
+                    if (a.success and a.slot == it.winning_slot)
+                    else "[green]ok[/green]"
+                    if a.success
+                    else "[red]skip[/red]"
+                )
+                if a.success and a.eval_summary:
+                    agg = a.eval_summary.get("aggregate", {})
+                    table.add_row(
+                        f"{it.iteration}.{a.label}",
+                        marker,
+                        Path(a.proposed_path or "?").stem,
+                        f"{agg.get('f1', 0.0):.3f}",
+                        str(
+                            agg.get("input_tokens", 0)
+                            + agg.get("output_tokens", 0)
+                        ),
+                        f"focus={a.focus[:40]}",
+                    )
+                else:
+                    table.add_row(
+                        f"{it.iteration}.{a.label}",
+                        marker,
+                        Path(a.proposed_path).stem if a.proposed_path else "-",
+                        "-",
+                        "-",
+                        (a.skip_reason or "")[:60],
+                    )
+            continue
+
         if it.success and it.eval_summary:
             agg = it.eval_summary.get("aggregate", {})
             table.add_row(
