@@ -36,7 +36,15 @@ class BaselineV0Agentic(Harness):
     max_turns = 30
     token_budget = 200_000
     output_cap_bytes = 30_000
-    default_scanners = ("semgrep", "bandit", "ruff", "gitleaks", "trivy")
+    default_scanners = (
+        "semgrep",
+        "bandit",
+        "ruff",
+        "gitleaks",
+        "trivy",
+        "hallucinated_import",
+        "vibe_llm",
+    )
 
     def __init__(self) -> None:
         settings = get_settings()
