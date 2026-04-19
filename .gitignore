@@ -40,7 +40,9 @@ htmlcov/
 Thumbs.db
 
 # s0-cli runtime artifacts
-runs/
+# IMPORTANT: anchor to repo root so it does not match `src/s0_cli/runs/`,
+# which is the Python source package that handles run-store I/O.
+/runs/
 *.log
 .env
 
