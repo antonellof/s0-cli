@@ -3,7 +3,7 @@
 # Consumers add this snippet to their `.pre-commit-config.yaml`:
 #
 #   repos:
-#     - repo: https://github.com/<owner>/s0-cli
+#     - repo: https://github.com/antonellof/s0-cli
 #       rev: v0.0.1   # or a commit SHA
 #       hooks:
 #         - id: s0-scan-staged          # fast, no LLM, runs on every commit

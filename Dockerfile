@@ -16,7 +16,7 @@
 #     -e OPENAI_API_KEY="$OPENAI_API_KEY" s0-cli scan .
 #
 # Or pull the published image (when available):
-#   docker run --rm -v "$PWD:/work" -w /work ghcr.io/<owner>/s0-cli:latest scan .
+#   docker run --rm -v "$PWD:/work" -w /work ghcr.io/antonellof/s0-cli:latest scan .
 
 FROM python:3.12-slim-bookworm AS base
 

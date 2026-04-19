@@ -92,7 +92,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: <owner>/s0-cli@v0
+      - uses: antonellof/s0-cli@v0
         with:
           mode: ${{ github.event_name == 'pull_request' && 'diff' || 'repo' }}
           fail-on: high
@@ -108,7 +108,7 @@ Multi-arch image with every scanner pre-installed (semgrep, bandit, ruff, gitlea
 ```bash
 docker run --rm -v "$PWD:/work" -w /work \
   -e OPENAI_API_KEY="$OPENAI_API_KEY" \
-  ghcr.io/<owner>/s0-cli:latest scan .
+  ghcr.io/antonellof/s0-cli:latest scan .
 ```
 
 The published `:latest` tag tracks `main`; pin to a `vX.Y.Z` tag or a short SHA for reproducible CI.
@@ -120,7 +120,7 @@ Two hooks ship in [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml). The fast o
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/<owner>/s0-cli
+  - repo: https://github.com/antonellof/s0-cli
     rev: v0.0.1
     hooks:
       - id: s0-scan-staged                   # every commit, ~1-2s
