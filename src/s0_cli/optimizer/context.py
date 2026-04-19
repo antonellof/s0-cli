@@ -91,12 +91,54 @@ def build_context(
     )
 
 
+FRONTIER_FILENAME = "_frontier.json"
+
+
+def write_frontier(runs_dir: Path) -> Path:
+    """Recompute the Pareto frontier from runs/ and snapshot it to a JSON file.
+
+    Stable artifact: makes the frontier inspectable from the shell, lets
+    downstream tooling (CI badges, dashboards) consume it without walking
+    the whole run-store, and gives a clean checkpoint between optimize
+    iterations. Returns the path written.
+    """
+    import time
+
+    runs = _load_runs(runs_dir, limit=10_000)
+    pareto = _pareto(runs)
+    payload = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "runs_total": len(runs),
+        "frontier_size": len(pareto),
+        "best_f1": max((r.f1 for r in runs if r.f1 is not None), default=None),
+        "frontier": [
+            {
+                "run_id": r.run_id,
+                "harness": r.harness_name,
+                "f1": r.f1,
+                "precision": r.precision,
+                "recall": r.recall,
+                "tokens": r.tokens,
+                "turns": r.turns,
+                "ended_via": r.ended_via,
+            }
+            for r in pareto
+        ],
+    }
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    out = runs_dir / FRONTIER_FILENAME
+    out.write_text(json.dumps(payload, indent=2, sort_keys=False), encoding="utf-8")
+    return out
+
+
 def _load_runs(runs_dir: Path, limit: int) -> list[RunEntry]:
     if not runs_dir.exists():
         return []
     out: list[RunEntry] = []
+    # Run dirs look like "2026-04-19T13-37-21Z__baseline_v0_agentic__947a";
+    # auxiliary dotfiles like _frontier.json are excluded by the .name filter.
     dirs = sorted(
-        (p for p in runs_dir.iterdir() if p.is_dir()),
+        (p for p in runs_dir.iterdir() if p.is_dir() and not p.name.startswith("_")),
         key=lambda p: p.name,
         reverse=True,
     )[:limit]

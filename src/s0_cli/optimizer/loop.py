@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import shutil
+import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,7 +17,7 @@ from rich.table import Table
 from s0_cli.config import get_settings
 from s0_cli.eval.runner import EvalRunner, load_harness_from_path
 from s0_cli.eval.validate import validate_harness
-from s0_cli.optimizer.context import build_context
+from s0_cli.optimizer.context import build_context, write_frontier
 from s0_cli.optimizer.proposer import Proposer, ProposerOutput
 from s0_cli.runs.store import RunStore
 
@@ -68,9 +71,25 @@ async def run_optimizer(
     only_tasks: list[str] | None = None,
     console: Console | None = None,
     test_bench_dir: Path | None = None,
+    fresh: bool = False,
+    run_name: str | None = None,
 ) -> OptimizerResult:
     console = console or Console()
     started = time.monotonic()
+
+    if run_name is not None:
+        if "/" in run_name or run_name.startswith("."):
+            raise ValueError(
+                f"run_name must be a single safe path segment, got {run_name!r}"
+            )
+        runs_dir = runs_dir / run_name
+        console.print(f"[dim]using isolated runs dir:[/dim] {runs_dir}")
+
+    if fresh:
+        if runs_dir.exists():
+            console.print(f"[yellow]--fresh: removing {runs_dir}[/yellow]")
+            shutil.rmtree(runs_dir)
+        runs_dir.mkdir(parents=True, exist_ok=True)
 
     if test_bench_dir is not None:
         try:
@@ -104,7 +123,30 @@ async def run_optimizer(
 
     iterations_log: list[IterationResult] = []
 
+    # Graceful shutdown: first Ctrl+C asks for an early exit at the next
+    # iteration boundary, persisting current results + frontier. A second
+    # Ctrl+C falls through to KeyboardInterrupt and aborts.
+    stop_flag = {"requested": False}
+    prev_handler = signal.getsignal(signal.SIGINT)
+
+    def _on_sigint(_signum, _frame):
+        if stop_flag["requested"]:
+            console.print("\n[red]second SIGINT — aborting now.[/red]")
+            signal.signal(signal.SIGINT, prev_handler)
+            raise KeyboardInterrupt
+        stop_flag["requested"] = True
+        console.print(
+            "\n[yellow]SIGINT received: finishing current iteration, then exiting. "
+            "Press Ctrl+C again to abort immediately.[/yellow]"
+        )
+
+    with contextlib.suppress(ValueError):  # main thread only
+        signal.signal(signal.SIGINT, _on_sigint)
+
     for i in range(1, iterations + 1):
+        if stop_flag["requested"]:
+            console.print(f"[yellow]early exit before iteration {i}[/yellow]")
+            break
         console.rule(f"[bold cyan]optimize iteration {i}/{iterations}")
 
         ctx = build_context(runs_dir, skill_md_path)
@@ -200,6 +242,15 @@ async def run_optimizer(
                 proposer_usage=proposer_out.usage,
             )
         )
+
+        try:
+            frontier_path = write_frontier(runs_dir)
+            console.print(f"[dim]frontier snapshot ->[/dim] {frontier_path}")
+        except Exception as e:  # noqa: BLE001 — non-fatal best-effort artifact
+            console.print(f"[yellow]frontier snapshot failed:[/yellow] {e}")
+
+    with contextlib.suppress(ValueError):
+        signal.signal(signal.SIGINT, prev_handler)
 
     final_ctx = build_context(runs_dir, skill_md_path)
 

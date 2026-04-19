@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from s0_cli.optimizer.context import _pareto, build_context
+from s0_cli.optimizer.context import (
+    FRONTIER_FILENAME,
+    _pareto,
+    build_context,
+    write_frontier,
+)
 
 
 def _mk_run(tmp: Path, name: str, f1: float | None, tokens: int | None) -> Path:
@@ -60,3 +65,34 @@ def test_build_context_loads_runs_and_ranks(tmp_path: Path) -> None:
     rendered = ctx.render(top_k=3)
     assert "Best F1 to date: 0.6" in rendered
     assert "seed2" in rendered
+
+
+def test_write_frontier_snapshots_pareto(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    _mk_run(runs_dir, "2026-01-01__seed1__aa", f1=0.4, tokens=1000)
+    _mk_run(runs_dir, "2026-01-02__seed2__bb", f1=0.6, tokens=500)  # Pareto
+    _mk_run(runs_dir, "2026-01-03__seed3__cc", f1=0.5, tokens=200)  # Pareto
+
+    out = write_frontier(runs_dir)
+    assert out.name == FRONTIER_FILENAME
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["runs_total"] == 3
+    assert payload["best_f1"] == 0.6
+    ids = {r["run_id"] for r in payload["frontier"]}
+    assert any("__seed2__" in i for i in ids)
+    assert any("__seed3__" in i for i in ids)
+    assert payload["frontier_size"] == len(payload["frontier"])
+
+
+def test_load_runs_skips_underscored_dirs(tmp_path: Path) -> None:
+    """Auxiliary dirs (e.g. _frontier.json sidecar) must not appear in runs."""
+    runs_dir = tmp_path / "runs"
+    _mk_run(runs_dir, "2026-01-01__real__aa", f1=0.5, tokens=100)
+    write_frontier(runs_dir)
+    (runs_dir / "_aux").mkdir()  # any underscore-prefixed dir is excluded
+
+    skill = tmp_path / "SKILL.md"
+    skill.write_text("", encoding="utf-8")
+    ctx = build_context(runs_dir, skill)
+    assert len(ctx.runs) == 1
+    assert ctx.runs[0].run_id.endswith("__aa")

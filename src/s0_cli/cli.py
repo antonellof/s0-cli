@@ -248,6 +248,14 @@ def cmd_optimize(
     skip_test_eval: bool = typer.Option(
         False, "--skip-test-eval", help="Skip the final held-out test-set evaluation phase."
     ),
+    fresh: bool = typer.Option(
+        False, "--fresh", help="Delete the target runs dir before starting (irreversible)."
+    ),
+    run_name: str | None = typer.Option(
+        None,
+        "--run-name",
+        help="Isolate this session under runs/<run-name>/. Combine with --fresh for a clean slate.",
+    ),
 ) -> None:
     """Outer Meta-Harness loop: propose -> validate -> eval, repeated.
 
@@ -293,6 +301,8 @@ def cmd_optimize(
         no_llm=no_llm,
         only_tasks=only_list,
         console=console,
+        fresh=fresh,
+        run_name=run_name,
     )
 
 
