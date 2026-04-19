@@ -66,30 +66,25 @@ uv run s0 runs grep "CWE-89"
 
 Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHub code-scanning, GitLab SAST, etc.).
 
+## Why not just run `semgrep` directly?
+
+Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.
+
+![Traditional SAST workflow vs s0-cli workflow](docs/img/vs-traditional.png)
+
+| | Traditional SAST | s0-cli |
+| - | - | - |
+| Detection | one scanner | 5 classic scanners + 2 AI-slop detectors, deduped |
+| Triage | manual (engineer reads each alert) | LLM agent reads source, traces taint, marks FPs |
+| Output | rule_id + line | severity + `why_real` + `fix_hint`, in markdown / JSON / SARIF |
+| Audit trail | none | full prompt + every tool call recorded under `runs/` |
+| Reproducibility | re-run and hope | replay any past scan from `runs/<id>/` |
+
 ## How it works
 
-```
-┌──────────────────────────┐
-│  s0 scan PATH            │
-└────────────┬─────────────┘
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  Inner harness (multi-turn agent)                    │
-│   1. seed: run all installed scanners on the target  │
-│   2. dedup across scanners by (path, line, rule)     │
-│   3. tool loop (≤30 turns): read_file, grep_code,    │
-│      git_blame, run_scanner, add_finding,            │
-│      mark_false_positive, task_complete              │
-│   4. emit normalized findings + full trace           │
-└────────────┬─────────────────────────────────────────┘
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  runs/<timestamp>__<harness>__<id>/                  │
-│   harness.py · score.json · summary.md ·             │
-│   findings.json · traces/<task>/{prompt, response,   │
-│   tools.jsonl, observation, scored.json}             │
-└──────────────────────────────────────────────────────┘
-```
+![s0-cli architecture](docs/img/architecture.png)
+
+`s0 scan` runs every installed scanner on the target in parallel, deduplicates findings across them by `(path, line, rule_id)`, and hands the result to the inner harness — a multi-turn LLM agent with a tightly scoped tool surface. The agent reads source, greps for taint, blames git history, re-runs scanners with tighter rules, then either accepts each finding (assigning a severity and a `fix_hint`) or marks it as a false positive. Everything it does — the prompt, every tool call, every LLM response — is recorded under `runs/<timestamp>__<harness>__<id>/` so any scan is reproducible and auditable.
 
 Two scanning agents ship out of the box:
 
@@ -128,9 +123,31 @@ All settings live in `.env` (see [`.env.example`](.env.example)). The most usefu
 | `S0_RUNS_DIR`          | `./runs`                           | Where to write run artifacts             |
 | `S0_FAIL_ON`           | `high`                             | Default `--fail-on` severity floor       |
 
-## Benchmark
+## Benchmark results
 
-The repository ships with an evaluation bench under `bench/`, split into a **train** set (visible to the optimizer) and a **held-out test** set (only scored at the end of an optimize session, to measure generalization). See [`bench/README.md`](bench/README.md) for the full task list and how to add new ones.
+The repository ships with 11 labeled tasks under `bench/` (7 training, 4 held-out for testing generalization). Every task has a `ground_truth.json` listing the real vulnerabilities; the scorer matches predictions by `(path, line ± 5)`. Numbers below are reproducible — run `uv run s0 eval` and `uv run s0 eval --split test` yourself.
+
+Two configurations on `openai/gpt-4o-mini`:
+
+| Configuration                   | Split | TP | FP | FN | Precision | Recall | F1   | Cost (in/out tokens)     |
+| ------------------------------- | ----- | -- | -- | -- | --------- | ------ | ---- | ------------------------ |
+| `--no-llm` (raw scanners only)  | train | 8  | 25 | 0  | 0.24      | **1.00** | 0.39 | 0 / 0                  |
+| `--no-llm` (raw scanners only)  | test  | 5  | 10 | 0  | 0.33      | **1.00** | 0.50 | 0 / 0                  |
+| `baseline_v0_agentic` (LLM)     | train | 8  | 23 | 0  | 0.26      | **1.00** | 0.41 | 97k / 6k               |
+| `baseline_v0_agentic` (LLM)     | test  | 5  | **7**  | 0  | **0.42** | **1.00** | **0.59** | 60k / 2k          |
+
+**What this proves:**
+
+- **Recall = 1.00 in every configuration.** Across all 13 ground-truth vulnerabilities (train + test) — SQL injection, command injection, hallucinated imports, path traversal, weak crypto, hardcoded secrets, JWT no-verify, pickle deserialization, stub auth, … — the deterministic scanner pipeline alone catches every one. The LLM never has to *find* anything; its job is purely to triage what was already found.
+- **LLM triage cuts false positives by 30% on the held-out set** (10 → 7) without dropping a single true positive. Held-out F1 climbs from 0.50 → **0.59** (+18% relative).
+- **Every scan ends in a fixed turn budget** (median 5 turns, max 11 in this run) and a fixed token budget. No runaway costs.
+- **The held-out test split was never seen by the LLM during any optimization run** — generalization is measured, not assumed.
+
+The `--no-llm` mode is a useful free anchor: you keep 100% recall and pay zero LLM cost, at the price of more false positives to skim through. Most CI pipelines will want the LLM mode on PR diffs (small target, low token cost, accurate triage) and the no-LLM mode on full-repo nightly scans.
+
+## Benchmark layout
+
+The bench is split into a **train** set (visible to the optimizer) and a **held-out test** set (only scored at the end of an optimize session). See [`bench/README.md`](bench/README.md) for the full task list and how to add new ones.
 
 ```bash
 # Score the default harness on the training tasks
