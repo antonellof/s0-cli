@@ -23,7 +23,7 @@ $ uv run s0 scan ./my-app
 ## Install
 
 ```bash
-git clone https://github.com/<your-org>/s0-cli.git
+git clone https://github.com/antonellof/s0-cli.git
 cd s0-cli
 uv sync                    # Python 3.12+, uv >= 0.5
 
@@ -68,6 +68,23 @@ uv run s0 runs grep "CWE-89"
 ```
 
 Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHub code-scanning, GitLab SAST, etc.).
+
+## Quickstart: optimize the agent
+
+The thing that makes s0-cli different from a plain SAST wrapper is that the scanning agent is a single Python file you can have an LLM rewrite for you, scored against a real labeled benchmark. One command runs the whole [Meta-Harness](https://yoonholee.com/meta-harness/) loop:
+
+```bash
+# 3 proposer iterations on the training bench, then a held-out test pass
+uv run s0 optimize -n 3
+
+# Want to see it work without spending tokens? Stub the LLM (zero-cost smoke test)
+uv run s0 optimize -n 1 --no-llm
+
+# Or fan out 2 parallel proposals per iteration and keep the best
+uv run s0 optimize -n 5 -k 2 --fresh --run-name exp1
+```
+
+Each iteration writes a new harness file under `src/s0_cli/harnesses/` and a scored run under `runs/`. The session ends with a final pass on `bench/tasks_test/` (the held-out set) so you can see the train→test generalization gap. Full design notes are in [Optimizing the agent](#optimizing-the-agent-meta-harness) below.
 
 ## Use it in CI
 
