@@ -14,7 +14,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from s0_cli.scanners.base import Finding, ScannerError, Severity
+from s0_cli.scanners.base import (
+    Finding,
+    ScannerError,
+    Severity,
+    normalize_to_root,
+    read_snippet,
+)
 from s0_cli.targets.base import Target, TargetMode
 
 _SEVERITY_MAP: dict[str, Severity] = {
@@ -99,7 +105,7 @@ def parse_semgrep_json(data: dict[str, Any], root: Path | None = None) -> list[F
     for r in results:
         check_id = r.get("check_id") or r.get("rule_id") or "unknown"
         path = r.get("path") or r.get("location", {}).get("path", "?")
-        path = _normalize_to_root(path, root)
+        path = normalize_to_root(path, root)
         start = r.get("start", {}) or {}
         end = r.get("end", {}) or {}
         line = int(start.get("line") or 0)
@@ -113,7 +119,7 @@ def parse_semgrep_json(data: dict[str, Any], root: Path | None = None) -> list[F
 
         snippet = (extra.get("lines") or "").strip() or None
         if not snippet or snippet == "requires login":
-            snippet = _read_snippet(root, path, line, end_line)
+            snippet = read_snippet(root, path, line, end_line)
         if snippet and len(snippet) > 1000:
             snippet = snippet[:1000] + "..."
 
@@ -140,40 +146,3 @@ def parse_semgrep_json(data: dict[str, Any], root: Path | None = None) -> list[F
     return out
 
 
-def _read_snippet(root: Path | None, rel_path: str, line: int, end_line: int) -> str | None:
-    """Read a small window of source around a finding's line range."""
-    if line <= 0:
-        return None
-    candidates: list[Path] = []
-    if root is not None:
-        candidates.append((root / rel_path).resolve())
-    candidates.append(Path(rel_path))
-    for p in candidates:
-        if not p.is_file():
-            continue
-        try:
-            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        start = max(0, line - 1)
-        stop = min(len(lines), max(end_line, line))
-        return "\n".join(lines[start:stop])
-    return None
-
-
-def _normalize_to_root(path: str, root: Path | None) -> str:
-    """Rewrite absolute paths to be relative to `root` when possible.
-
-    Semgrep prints absolute paths when invoked with an absolute target.
-    The scorer matches on relative paths, and the LLM should see relative
-    paths so it can `read_file("foo.py")` directly through the tool layer.
-    """
-    if not path or root is None:
-        return path
-    p = Path(path)
-    if not p.is_absolute():
-        return str(p)
-    try:
-        return str(p.resolve().relative_to(root.resolve()))
-    except ValueError:
-        return str(p)

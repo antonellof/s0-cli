@@ -26,17 +26,17 @@ from s0_cli.harness.loop import agent_loop
 from s0_cli.harness.tools import ToolContext, Tools, _finding_summary
 from s0_cli.prompts import load as load_prompt
 from s0_cli.scanners import REGISTRY as SCANNER_REGISTRY
-from s0_cli.scanners.semgrep import SemgrepScanner
+from s0_cli.scanners.base import Finding
 from s0_cli.targets.base import Target
 
 
 class BaselineV0Agentic(Harness):
     name = "baseline_v0_agentic"
-    description = "KIRA-style multi-turn investigator over semgrep candidates."
+    description = "KIRA-style multi-turn investigator over multi-scanner candidates."
     max_turns = 30
     token_budget = 200_000
     output_cap_bytes = 30_000
-    default_scanners = ("semgrep",)
+    default_scanners = ("semgrep", "bandit", "ruff", "gitleaks", "trivy")
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -54,9 +54,7 @@ class BaselineV0Agentic(Harness):
 
     async def scan(self, target: Target) -> ScanResult:
         env = await env_snapshot(target)
-
-        scanner = SemgrepScanner()
-        seed_findings = scanner.run(target) if scanner.is_available() else []
+        seed_findings = _seed_from_scanners(self.default_scanners, target)
 
         ctx = ToolContext(target=target, output_cap_bytes=self.output_cap_bytes)
         tools = Tools(ctx)
@@ -93,6 +91,45 @@ class BaselineV0Agentic(Harness):
             usage=loop_result.usage,
             ended_via=loop_result.ended_via,
         )
+
+
+def _seed_from_scanners(names: tuple[str, ...], target: Target) -> list[Finding]:
+    """Run every available scanner and dedupe findings cross-tool.
+
+    Two findings are considered duplicates when they share (path, line,
+    rule_id_normalized). Cross-tool duplicates (e.g. semgrep + bandit both
+    flagging the same `subprocess(shell=True)` line) get collapsed; the
+    higher-confidence one wins. Skipping a missing binary is silent — the
+    LLM still sees a `seed_findings` list, just shorter.
+    """
+    deduped: dict[tuple[str, int, str], Finding] = {}
+    for name in names:
+        scanner_cls = SCANNER_REGISTRY.get(name)
+        if scanner_cls is None:
+            continue
+        scanner = scanner_cls()
+        if not scanner.is_available():
+            continue
+        try:
+            findings = scanner.run(target)
+        except Exception as e:  # noqa: BLE001 — seed-phase isolation
+            print(f"warning: seed scanner {name!r} failed: {type(e).__name__}: {e}")
+            continue
+        for f in findings:
+            key = (f.path, f.line, _normalize_rule(f.rule_id))
+            existing = deduped.get(key)
+            if existing is None or f.confidence > existing.confidence:
+                deduped[key] = f
+    return sorted(deduped.values(), key=lambda f: (f.path, f.line, f.rule_id))
+
+
+def _normalize_rule(rule_id: str) -> str:
+    """Strip vendor/family prefixes so cross-tool dedup actually catches dupes."""
+    rid = rule_id.lower()
+    for prefix in ("python.", "javascript.", "java.", "go.", "rules."):
+        if rid.startswith(prefix):
+            rid = rid[len(prefix):]
+    return rid.split(".")[-1]
 
 
 def _render_seeds(seeds: list) -> str:

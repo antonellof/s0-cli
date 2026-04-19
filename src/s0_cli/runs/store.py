@@ -10,10 +10,11 @@ import dataclasses
 import inspect
 import json
 import secrets
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from s0_cli.harness.base import Harness, ScanResult
 from s0_cli.scanners.base import Finding
@@ -55,7 +56,7 @@ class RunStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def new_run_dir(self, harness_name: str) -> tuple[Path, str]:
-        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+        ts = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
         sid = secrets.token_hex(2)
         run_id = f"{ts}__{harness_name}__{sid}"
         path = self.root / run_id
