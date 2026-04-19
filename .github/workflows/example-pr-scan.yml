@@ -1,17 +1,17 @@
-# Example workflow consumers can copy into their repo as
-# `.github/workflows/s0-scan.yml`.
+# Self-scan: dogfoods the action against this repo on every PR + push to main.
 #
-# Scans the diff on every PR + the full repo nightly, and pushes findings into
-# GitHub code scanning so they show up in the PR's "Security" tab.
+# Runs in --no-llm mode so it's free and needs no secrets — sufficient to
+# prove the deterministic-scanner pipeline + SARIF upload work end-to-end.
+# Consumers who want full LLM triage should copy the snippet from README.md
+# (which sets `openai-api-key: ${{ secrets.OPENAI_API_KEY }}` and drops
+# `no-llm`) into their own `.github/workflows/s0-scan.yml`.
+
 name: s0-cli scan
 
 on:
   pull_request:
   push:
     branches: [main]
-  schedule:
-    # Nightly full-repo scan at 03:17 UTC.
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -26,8 +26,8 @@ jobs:
         with:
           fetch-depth: 0  # required for diff mode against the PR base
 
-      - uses: ./  # In a consumer repo, replace with: your-org/s0-cli@v0
+      - uses: ./
         with:
           mode: ${{ github.event_name == 'pull_request' && 'diff' || 'repo' }}
-          fail-on: high
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          fail-on: critical  # don't fail PRs on existing medium-severity findings
+          no-llm: "true"

@@ -87,13 +87,22 @@ runs:
 
     - name: Install s0-cli
       shell: bash
+      env:
+        ACTION_REPO: ${{ github.action_repository }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
         ref='${{ inputs.s0-version }}'
-        if [[ "$ref" == "main" || "$ref" =~ ^[a-f0-9]{7,40}$ || "$ref" == v* ]]; then
+        # When the action is referenced as `uses: ./` (local checkout, used
+        # for in-repo testing) ACTION_REPO is empty. In that case install
+        # from the action's checked-out source directory directly.
+        if [[ -z "${ACTION_REPO:-}" && -n "${ACTION_PATH:-}" ]]; then
+          pip install "${ACTION_PATH}"
+        elif [[ "$ref" == "main" || "$ref" =~ ^[a-f0-9]{7,40}$ || "$ref" == v* ]]; then
           # Install from a git ref so users can pin behavior to a tag/sha.
-          pip install "git+https://github.com/${GITHUB_ACTION_REPOSITORY:-}@${ref}"
+          pip install "git+https://github.com/${ACTION_REPO}@${ref}"
         else
+          # PyPI version pin.
           pip install "s0-cli==${ref}"
         fi
         s0 version
