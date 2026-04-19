@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "pickle-loads-untrusted",
+    "severity": "critical",
+    "path": "app.py",
+    "line": 13,
+    "cwe": ["CWE-502"],
+    "note": "pickle.loads on attacker-controlled bytes via /restore?state=<b64>"
+  }
+]

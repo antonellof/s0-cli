@@ -1,0 +1,18 @@
+[
+  {
+    "rule_id": "command-injection-shell-true",
+    "severity": "critical",
+    "path": "app.py",
+    "line": 14,
+    "cwe": ["CWE-78"],
+    "note": "subprocess.run(cmd, shell=True) with user-controlled cmd"
+  },
+  {
+    "rule_id": "command-injection-os-system",
+    "severity": "critical",
+    "path": "app.py",
+    "line": 21,
+    "cwe": ["CWE-78"],
+    "note": "os.system() with concatenated user input"
+  }
+]

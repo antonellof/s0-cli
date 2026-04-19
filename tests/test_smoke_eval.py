@@ -13,7 +13,7 @@ import pytest
 from s0_cli.eval.runner import EvalRunner, load_harness_by_name
 from s0_cli.runs.store import RunStore
 
-BENCH = Path(__file__).parent.parent / "bench" / "tasks"
+BENCH = Path(__file__).parent.parent / "bench" / "tasks_train"
 
 
 @pytest.mark.asyncio

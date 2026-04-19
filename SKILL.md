@@ -28,11 +28,12 @@ Your harness file must:
 
 ## Forbidden paths (do NOT modify or read for cheating)
 
-- `bench/**` — labeled tasks. Reading ground truth would let you cheat.
+- `bench/tasks_train/**` — labeled training tasks. You don't need to read these directly; the runner loads them. Reading ground truth would let you cheat.
+- `bench/tasks_test/**` — **HELD-OUT TEST SET. Reading any file under here is an automatic disqualification.** You will never see these tasks in `runs/` traces because the optimizer only evaluates on the train split during the loop. The test set is only re-scored at the very end of `s0 optimize`, on the harness with the best train F1, to measure generalization. If you find yourself wanting to read this directory, stop and reconsider: any pattern you optimize against `tasks_test` is overfitting.
 - `src/s0_cli/eval/**` — evaluator and scorer. Don't game the metric.
 - `src/s0_cli/scanners/**` — scanner integrations. Treat as fixed tools.
 - `src/s0_cli/runs/store.py` — run-store schema. Don't change the API the proposer reads.
-- `runs/<other_harness>/traces/**/findings.json` is fine to read; `runs/**/ground_truth.json` is also fine (it's already in `bench/` and gets copied per-trace as a label, not as input to your harness at scan time).
+- `runs/<other_harness>/traces/**/findings.json` is fine to read; `runs/**/ground_truth.json` is also fine (it's already in `bench/tasks_train/` and gets copied per-trace as a label, not as input to your harness at scan time).
 
 You **may** create new files under `src/s0_cli/harnesses/` and `src/s0_cli/prompts/`.
 
@@ -71,8 +72,9 @@ Things prior harnesses have gotten wrong; consider edits along these axes:
 
 ## Anti-patterns observed in prior runs
 
-- Hardcoding bench task names, file paths, or rule_ids: instant disqualification on held-out (Phase 4).
+- Hardcoding bench task names, file paths, or rule_ids: instant disqualification on held-out (`bench/tasks_test/`).
 - Reading ground truth from `runs/**/ground_truth.json` and echoing it as findings: same.
+- Touching `bench/tasks_test/` in any way: automatic disqualification.
 - Disabling the turn cap: causes infinite loops on hard tasks; budget exists for a reason.
 - Removing the env_snapshot: paper §A.2 iterations 1-6 all regressed when the bootstrap was tampered with.
 

@@ -158,7 +158,12 @@ def cmd_scan(
 @app.command("eval")
 def cmd_eval(
     harness: str | None = typer.Option(None, "--harness"),
-    bench: Path = typer.Option(Path("bench/tasks"), "--bench", help="Bench root."),
+    bench: Path | None = typer.Option(
+        None, "--bench", help="Bench root (overrides --split)."
+    ),
+    split: str = typer.Option(
+        "train", "--split", help="Bench split: train (visible to optimizer) or test (held out)."
+    ),
     only: str | None = typer.Option(None, "--only", help="Comma-separated task IDs."),
     no_llm: bool = typer.Option(False, "--no-llm"),
     validate_only: bool = typer.Option(False, "--validate-only", help="Static checks only."),
@@ -187,10 +192,16 @@ def cmd_eval(
         h.with_no_llm()
 
     only_list = [x.strip() for x in only.split(",")] if only else None
-    runner = EvalRunner(bench_root=bench, store=RunStore(settings.runs_dir))
+    from s0_cli.eval.runner import resolve_bench_root
+
+    bench_root = bench if bench is not None else resolve_bench_root(split)
+    runner = EvalRunner(bench_root=bench_root, store=RunStore(settings.runs_dir))
 
     if not quiet:
-        console.print(f"[bold]eval[/] harness={name} bench={bench} only={only_list} no_llm={no_llm}")
+        console.print(
+            f"[bold]eval[/] harness={name} split={split} bench={bench_root} "
+            f"only={only_list} no_llm={no_llm}"
+        )
 
     summary = asyncio.run(
         runner.run(
@@ -222,12 +233,20 @@ def cmd_eval(
 @app.command("optimize")
 def cmd_optimize(
     iterations: int = typer.Option(3, "--iterations", "-n", help="Outer-loop iterations."),
-    bench: Path = typer.Option(Path("bench/tasks"), "--bench"),
+    bench: Path | None = typer.Option(
+        None, "--bench", help="Train bench root (overrides default bench/tasks_train)."
+    ),
+    test_bench: Path | None = typer.Option(
+        None, "--test-bench", help="Held-out test bench root (overrides default bench/tasks_test)."
+    ),
     only: str | None = typer.Option(None, "--only", help="Comma-separated bench task IDs."),
     skill: Path = typer.Option(Path("SKILL.md"), "--skill", help="SKILL.md path."),
     max_proposer_turns: int = typer.Option(25, "--max-turns", help="Max tool-loop turns per proposal."),
     no_llm: bool = typer.Option(
         False, "--no-llm", help="Stub mode (proposer + harness both skip LLM; smoke-test only)."
+    ),
+    skip_test_eval: bool = typer.Option(
+        False, "--skip-test-eval", help="Skip the final held-out test-set evaluation phase."
     ),
 ) -> None:
     """Outer Meta-Harness loop: propose -> validate -> eval, repeated.
@@ -251,14 +270,21 @@ def cmd_optimize(
         )
         raise typer.Exit(code=2)
 
+    from s0_cli.eval.runner import BENCH_ROOT_DEFAULT, BENCH_TEST_DEFAULT
+
+    train_bench = bench if bench is not None else BENCH_ROOT_DEFAULT
+    held_out_bench = test_bench if test_bench is not None else BENCH_TEST_DEFAULT
+
     console.print(
-        f"[bold]optimize[/] iterations={iterations} bench={bench} "
+        f"[bold]optimize[/] iterations={iterations} train_bench={train_bench} "
+        f"test_bench={held_out_bench if not skip_test_eval else '(skipped)'} "
         f"model={settings.model} no_llm={no_llm}"
     )
 
     cli_run_optimizer_sync(
         runs_dir=settings.runs_dir,
-        bench_dir=bench,
+        bench_dir=train_bench,
+        test_bench_dir=held_out_bench if not skip_test_eval else None,
         skill_md_path=skill,
         harnesses_dir=Path(harnesses_path[0]),
         prompts_dir=Path(prompts_path[0]),

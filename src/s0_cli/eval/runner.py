@@ -1,8 +1,11 @@
 """Bench runner.
 
-Loads a harness, walks `bench/tasks/<task>/`, runs the harness's `scan()` on
-`bench/tasks/<task>/target/`, scores against `ground_truth.json`, aggregates,
-and (unless `--dry-run`) writes a run to the run-store.
+Loads a harness, walks `bench/tasks_train/<task>/` (or `tasks_test/`), runs the
+harness's `scan()` on `<task>/target/`, scores against `ground_truth.json`,
+aggregates, and (unless `--dry-run`) writes a run to the run-store.
+
+The default split is `train`. The held-out `test` split is only meant to be
+used at the end of an `s0 optimize` run to measure generalization.
 """
 
 from __future__ import annotations
@@ -19,7 +22,17 @@ from s0_cli.harness.base import Harness, ScanResult
 from s0_cli.runs.store import RunStore, TaskTrace, write_run
 from s0_cli.targets.repo import build_repo_target
 
-BENCH_ROOT_DEFAULT = Path("bench/tasks")
+BENCH_ROOT_DEFAULT = Path("bench/tasks_train")
+BENCH_TEST_DEFAULT = Path("bench/tasks_test")
+
+
+def resolve_bench_root(split: str) -> Path:
+    """Map a split name to its bench directory."""
+    if split == "train":
+        return BENCH_ROOT_DEFAULT
+    if split == "test":
+        return BENCH_TEST_DEFAULT
+    raise ValueError(f"Unknown bench split {split!r}; expected 'train' or 'test'.")
 
 
 @dataclass

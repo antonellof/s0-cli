@@ -69,7 +69,7 @@ def test_hallucinated_import_handles_syntax_error(tmp_path: Path):
 
 def test_hallucinated_import_on_real_bench_target():
     """Sanity check against the bench task — must catch the seeded vuln."""
-    bench = Path(__file__).parent.parent / "bench" / "tasks" / "hallucinated_import" / "target"
+    bench = Path(__file__).parent.parent / "bench" / "tasks_train" / "hallucinated_import" / "target"
     if not bench.is_dir():
         pytest.skip("bench task missing")
         findings = HallucinatedImportScanner().run(build_repo_target(bench))

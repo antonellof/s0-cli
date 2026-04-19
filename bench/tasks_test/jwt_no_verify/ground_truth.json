@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "jwt-decode-no-verify",
+    "severity": "critical",
+    "path": "auth.py",
+    "line": 14,
+    "cwe": ["CWE-347"],
+    "note": "jwt.decode with options={'verify_signature': False} — anyone can forge tokens"
+  }
+]

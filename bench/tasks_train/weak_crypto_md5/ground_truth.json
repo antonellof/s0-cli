@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "weak-crypto-md5-password-hash",
+    "severity": "high",
+    "path": "auth.py",
+    "line": 7,
+    "cwe": ["CWE-327", "CWE-916"],
+    "note": "Unsalted MD5 used to hash passwords"
+  }
+]

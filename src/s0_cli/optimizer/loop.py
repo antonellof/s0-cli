@@ -31,12 +31,28 @@ class IterationResult:
 
 
 @dataclass
+class TestEvalResult:
+    """Final held-out test-set evaluation of the best harness.
+
+    Recorded so callers (and the summary table) can show whether the train-set
+    F1 improvement actually generalized.
+    """
+
+    harness_name: str
+    train_f1: float | None
+    test_aggregate: dict[str, Any]
+    skipped: bool = False
+    skip_reason: str | None = None
+
+
+@dataclass
 class OptimizerResult:
     iterations: list[IterationResult]
     best_f1_before: float | None
     best_f1_after: float | None
     runs_dir: Path
     elapsed_sec: float
+    test_eval: TestEvalResult | None = None
 
 
 async def run_optimizer(
@@ -51,9 +67,25 @@ async def run_optimizer(
     no_llm: bool = False,
     only_tasks: list[str] | None = None,
     console: Console | None = None,
+    test_bench_dir: Path | None = None,
 ) -> OptimizerResult:
     console = console or Console()
     started = time.monotonic()
+
+    if test_bench_dir is not None:
+        try:
+            train_resolved = bench_dir.resolve()
+            test_resolved = test_bench_dir.resolve()
+        except OSError:
+            train_resolved = bench_dir
+            test_resolved = test_bench_dir
+        if train_resolved == test_resolved:
+            raise ValueError(
+                "Train bench and test bench resolve to the same directory "
+                f"({train_resolved}). The held-out test set must be disjoint "
+                "from the training set, otherwise final-test results overstate "
+                "generalization."
+            )
 
     initial_ctx = build_context(runs_dir, skill_md_path)
     best_before = initial_ctx.best_f1
@@ -170,9 +202,21 @@ async def run_optimizer(
         )
 
     final_ctx = build_context(runs_dir, skill_md_path)
-    elapsed = time.monotonic() - started
 
-    _print_summary(console, iterations_log, best_before, final_ctx.best_f1, elapsed)
+    test_eval: TestEvalResult | None = None
+    if test_bench_dir is not None:
+        test_eval = await _run_final_test_eval(
+            console=console,
+            iterations_log=iterations_log,
+            harnesses_dir=harnesses_dir,
+            test_bench_dir=test_bench_dir,
+            store=store,
+            settings_model=settings.model,
+            no_llm=no_llm,
+        )
+
+    elapsed = time.monotonic() - started
+    _print_summary(console, iterations_log, best_before, final_ctx.best_f1, elapsed, test_eval)
 
     return OptimizerResult(
         iterations=iterations_log,
@@ -180,6 +224,107 @@ async def run_optimizer(
         best_f1_after=final_ctx.best_f1,
         runs_dir=runs_dir,
         elapsed_sec=elapsed,
+        test_eval=test_eval,
+    )
+
+
+async def _run_final_test_eval(
+    *,
+    console: Console,
+    iterations_log: list[IterationResult],
+    harnesses_dir: Path,
+    test_bench_dir: Path,
+    store: RunStore,
+    settings_model: str,
+    no_llm: bool,
+) -> TestEvalResult:
+    """Pick the best train-set candidate from this session and re-score it on the held-out test set.
+
+    "Best" = highest train-set F1 among iterations that actually evaluated.
+    Ties are broken by lowest token usage (prefer the cheaper harness on the
+    Pareto frontier). Returns a `TestEvalResult` even when skipped, so the
+    summary table can show *why* the test phase did not run.
+    """
+    best: tuple[float, int, IterationResult] | None = None
+    for it in iterations_log:
+        if not it.success or not it.eval_summary:
+            continue
+        agg = it.eval_summary.get("aggregate") or {}
+        f1 = float(agg.get("f1", 0.0) or 0.0)
+        toks = int(agg.get("input_tokens", 0) or 0) + int(agg.get("output_tokens", 0) or 0)
+        cand = (f1, -toks, it)  # max f1, then max -tokens (== min tokens)
+        if best is None or cand > best:
+            best = cand
+
+    if best is None:
+        console.print("[yellow]final test eval:[/yellow] no successful iteration to evaluate.")
+        return TestEvalResult(
+            harness_name="-",
+            train_f1=None,
+            test_aggregate={},
+            skipped=True,
+            skip_reason="no successful iteration",
+        )
+
+    train_f1, _neg_tokens, it = best
+    if it.proposed_path is None:
+        return TestEvalResult(
+            harness_name="-",
+            train_f1=train_f1,
+            test_aggregate={},
+            skipped=True,
+            skip_reason="best iteration had no proposed_path",
+        )
+
+    harness_path = Path(it.proposed_path)
+    if not harness_path.is_file():
+        # Fallback: look it up under the harnesses directory by stem.
+        candidate = harnesses_dir / f"{harness_path.stem}.py"
+        if candidate.is_file():
+            harness_path = candidate
+        else:
+            return TestEvalResult(
+                harness_name=harness_path.stem,
+                train_f1=train_f1,
+                test_aggregate={},
+                skipped=True,
+                skip_reason=f"harness file disappeared: {harness_path}",
+            )
+
+    try:
+        harness = load_harness_from_path(harness_path)
+        if no_llm and hasattr(harness, "with_no_llm"):
+            harness.with_no_llm()
+    except Exception as e:
+        return TestEvalResult(
+            harness_name=harness_path.stem,
+            train_f1=train_f1,
+            test_aggregate={},
+            skipped=True,
+            skip_reason=f"import failed: {type(e).__name__}: {e}",
+        )
+
+    console.rule(f"[bold magenta]final test eval: {harness_path.stem}")
+    console.print(
+        f"running on held-out bench={test_bench_dir} "
+        f"(train_f1={train_f1:.3f}, no_llm={no_llm})"
+    )
+
+    test_runner = EvalRunner(bench_root=test_bench_dir, store=store)
+    test_summary = await test_runner.run(
+        harness,
+        invocation=f"s0 optimize final-test harness={harness_path.stem}",
+        config_extra={
+            "model": settings_model,
+            "no_llm": no_llm,
+            "from_optimizer": True,
+            "phase": "final_test_eval",
+        },
+    )
+    return TestEvalResult(
+        harness_name=harness_path.stem,
+        train_f1=train_f1,
+        test_aggregate=test_summary.aggregate,
     )
 
 
@@ -189,6 +334,7 @@ def _print_summary(
     best_before: float | None,
     best_after: float | None,
     elapsed: float,
+    test_eval: TestEvalResult | None = None,
 ) -> None:
     table = Table(title="optimize summary", show_lines=False)
     table.add_column("iter")
@@ -223,9 +369,27 @@ def _print_summary(
     delta = (best_after or 0) - (best_before or 0)
     color = "green" if delta > 0 else "yellow" if delta == 0 else "red"
     console.print(
-        f"best_f1: {best_before} -> [{color}]{best_after}[/{color}] "
+        f"best_f1 (train): {best_before} -> [{color}]{best_after}[/{color}] "
         f"(delta={delta:+.3f}) elapsed={elapsed:.1f}s"
     )
+
+    if test_eval is not None:
+        if test_eval.skipped:
+            console.print(
+                f"[yellow]final test eval skipped:[/yellow] {test_eval.skip_reason}"
+            )
+        else:
+            agg = test_eval.test_aggregate
+            train_f1 = test_eval.train_f1 or 0.0
+            test_f1 = float(agg.get("f1", 0.0) or 0.0)
+            gap = test_f1 - train_f1
+            gap_color = "green" if gap >= -0.05 else "red"
+            console.print(
+                f"[bold]final test eval[/] harness={test_eval.harness_name} "
+                f"train_f1={train_f1:.3f} -> "
+                f"test_f1=[{gap_color}]{test_f1:.3f}[/{gap_color}] "
+                f"(gap={gap:+.3f}, prec={agg.get('precision')}, rec={agg.get('recall')})"
+            )
 
 
 def cli_run_optimizer_sync(**kwargs) -> OptimizerResult:

@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "yaml-unsafe-load",
+    "severity": "high",
+    "path": "config.py",
+    "line": 9,
+    "cwe": ["CWE-502"],
+    "note": "yaml.load without Loader= is equivalent to UnsafeLoader; arbitrary Python execution from a controlled YAML file"
+  }
+]

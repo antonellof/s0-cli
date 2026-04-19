@@ -1,0 +1,10 @@
+[
+  {
+    "rule_id": "path-traversal-open",
+    "severity": "high",
+    "path": "app.py",
+    "line": 13,
+    "cwe": ["CWE-22"],
+    "note": "open() on a path joined with unvalidated user input"
+  }
+]
