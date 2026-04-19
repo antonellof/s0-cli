@@ -81,7 +81,16 @@ class EvalRunner:
             ground_truth = json.loads(gt_path.read_text(encoding="utf-8"))
 
             target = build_repo_target(target_dir)
-            result: ScanResult = await harness.scan(target)
+            try:
+                result: ScanResult = await harness.scan(target)
+            except Exception as e:  # broken candidate harnesses are common in s0 optimize
+                err_type = type(e).__name__
+                result = ScanResult(
+                    findings=[],
+                    trace=[{"type": "error", "error": f"{err_type}: {e}"}],
+                    usage={"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0, "turns": 0},
+                    ended_via=f"error:{err_type}",
+                )
 
             scored = score_findings(result.findings, ground_truth)
 

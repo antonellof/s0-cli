@@ -2,10 +2,16 @@
 
 Loaded from environment variables and `.env`. Every harness reads from the same
 `Settings` object so that the run-store snapshot reflects the actual config used.
+
+The CLI also propagates non-`S0_*` keys from `.env` (e.g. `OPENAI_API_KEY`)
+into `os.environ` so that downstream libs like `litellm` see them. pydantic
+only loads keys with the `S0_` prefix; provider keys are unprefixed by
+convention and need this side-channel.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -44,5 +50,49 @@ class Settings(BaseSettings):
     request_timeout_sec: int = 120
 
 
+_PROVIDER_KEYS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    "AZURE_API_KEY",
+    "AZURE_API_BASE",
+    "AZURE_API_VERSION",
+)
+
+
+def _load_dotenv_provider_keys(env_file: Path = Path(".env")) -> None:
+    """Best-effort: copy provider API keys from `.env` into `os.environ`.
+
+    pydantic-settings only loads `S0_*` keys (env_prefix). litellm reads
+    provider keys directly from `os.environ`, so we need to forward them
+    ourselves. We do NOT overwrite an already-set environment variable.
+    Format is the standard `KEY=value` per line, with `#` comments allowed.
+    """
+    if not env_file.is_file():
+        return
+    try:
+        text = env_file.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if not value or key not in _PROVIDER_KEYS:
+            continue
+        if os.environ.get(key):
+            continue
+        os.environ[key] = value
+
+
 def get_settings() -> Settings:
+    _load_dotenv_provider_keys()
     return Settings()

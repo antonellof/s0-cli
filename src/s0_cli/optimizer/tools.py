@@ -147,6 +147,18 @@ PROPOSER_TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "validate",
+            "description": (
+                "Run the static validator (syntax, forbidden imports, Harness subclass present, "
+                "name attribute matches filename) on the harness file you just wrote. Call this "
+                "BEFORE finish to catch obvious mistakes that would waste an evaluation budget."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finish",
             "description": (
                 "Signal that the new harness is ready for evaluation. Provide a short summary "
@@ -275,6 +287,19 @@ class ProposerTools:
         target.write_text(source, encoding="utf-8")
         self.ctx.written_prompt = target
         return {"ok": True, "path": str(target), "bytes": len(source)}
+
+    def _t_validate(self) -> dict[str, Any]:
+        from s0_cli.eval.validate import validate_harness
+
+        if self.ctx.written_harness is None:
+            return {"ok": False, "errors": ["No harness written yet."], "warnings": []}
+        report = validate_harness(self.ctx.written_harness)
+        return {
+            "ok": report.ok,
+            "errors": list(report.errors),
+            "warnings": list(report.warnings),
+            "harness_class": report.harness_class,
+        }
 
     def _t_finish(self, summary: str) -> dict[str, Any]:
         self.ctx.finished = True

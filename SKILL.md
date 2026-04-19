@@ -18,9 +18,13 @@ Your harness file must:
 - Define exactly one class subclassing `s0_cli.harness.base.Harness`.
 - Set `name = "<your_name>"` (must match the filename).
 - Implement `async def scan(self, target: Target) -> ScanResult`.
-- Use only tools from `s0_cli.harness.tools.Tools` — do not import scanners directly, do not exec/subprocess on your own.
+- Import the types you reference: `Target` from `s0_cli.targets.base`, `ScanResult` from `s0_cli.harness.base`, `Finding` from `s0_cli.scanners.base`. Forgetting to import these is the single most common failure mode for new candidates.
+- Use only tools from `s0_cli.harness.tools.Tools` — do not import scanners directly, do not exec/subprocess on your own. **`Tools` is a class you instantiate with a `ToolContext`, not a registry of scanner attributes.** See `read_harness("baseline_v0_agentic")` for the correct pattern.
 - Be self-contained in one file (you may import from `s0_cli.harness.*` and `s0_cli.scanners.*` types, but no other harness files).
 - Run within budgets: `max_turns`, `token_budget`, `output_cap_bytes` (set as class attributes).
+- Return a real `ScanResult(findings=[...], trace=[...], usage={...}, ended_via="...")`. Returning a dict will crash the evaluator.
+
+**Before writing your file, ALWAYS call `read_harness("baseline_v0_agentic")` to copy the import block, the `_llm` / `_tools` / `_loop` plumbing, and the `with_no_llm` method. Then make your *additive* change on top.**
 
 ## Forbidden paths (do NOT modify or read for cheating)
 

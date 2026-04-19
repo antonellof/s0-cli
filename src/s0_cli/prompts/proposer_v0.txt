@@ -27,22 +27,61 @@ required interface, the objective, and known anti-patterns from prior runs.
 {initial_summary}
 ```
 
-# Process
+# Process — follow in this order
 
-1. **Diagnose**. Read at least 3 traces from prior runs to see what failed.
+1. **Read the seed harness FIRST.** Call
+   `read_harness("baseline_v0_agentic")` (and optionally
+   `read_harness("baseline_v0_singleshot")`). You must copy the import block,
+   the `__init__` plumbing (`_llm`, `_tools`, `_loop`), and `with_no_llm`
+   verbatim — the runtime expects these. Skipping this step is the #1 cause
+   of broken candidates.
+2. **Diagnose.** Read at least 3 traces from prior runs to see what failed.
    Look at `false_positives` and `false_negatives` in `scored.json` per task.
-2. **Form a hypothesis** about a specific bottleneck (over-reporting on XSS,
+3. **Form a hypothesis** about a specific bottleneck (over-reporting on XSS,
    missing vibe-code patterns, wasted turns on dead-end files, etc.).
-3. **Pick a small, additive change**. The paper's section A.2 reports that
-   "purely additive" wins after multiple regression iterations. Avoid
-   wholesale rewrites of the seed harnesses.
-4. **Write the new harness file** with `write_harness`. Choose a descriptive
+4. **Pick a small, additive change**. The paper's section A.2 reports that
+   "purely additive" wins after multiple regression iterations. Start from
+   the full baseline source and add ONE thing (a post-filter, an extra
+   prompt instruction, a new heuristic). Do not rewrite from scratch.
+5. **Write the new harness file** with `write_harness`. Choose a descriptive
    name like `v1_xss_filter` or `v1_vibe_aware`. Inherit from `Harness`,
    keep `name = "<name>"` matching the filename.
-5. **(Optional)** Write a new prompt template if you want to change the
+6. **(Optional)** Write a new prompt template if you want to change the
    system message. Reference it from your harness with `prompts.load("name.txt")`.
-6. **Call `finish`** with a 2-3 sentence summary of what you changed and the
+7. **Call `validate` to self-check**. The validator parses your file, looks
+   for a Harness subclass, checks imports, etc. If it returns `ok: false`,
+   read its `errors`, fix the file with another `write_harness`, and call
+   `validate` again until it passes.
+8. **Call `finish`** with a 2-3 sentence summary of what you changed and the
    expected effect (precision/recall/cost direction).
+
+# Common LLM mistakes to avoid
+
+- Wrapping the entire file in a triple-quoted string (`""" ... """`). The
+  validator will see "No class subclassing Harness found." Use plain
+  comments (`# ...`) for the file header instead.
+- Forgetting `from __future__ import annotations` — `Target` and `ScanResult`
+  in the `scan` signature need it on Python 3.11.
+- Using `Tools.semgrep` or `Tools.<scanner>`. Tools is instantiated with
+  `Tools(ctx)`; scanners are invoked via `Tools.run_scanner` (a tool method
+  inside the agent loop) or by importing `SemgrepScanner` from
+  `s0_cli.scanners.semgrep` directly and calling `.run(target)`.
+- Returning a dict instead of a `ScanResult` instance.
+
+# Required imports (copy this block verbatim into every harness)
+
+```python
+from __future__ import annotations
+from s0_cli.harness.base import Harness, ScanResult
+from s0_cli.harness.llm import LLM
+from s0_cli.harness.loop import agent_loop
+from s0_cli.harness.tools import Tools, ToolContext, TOOL_SCHEMAS
+from s0_cli.scanners.base import Finding
+from s0_cli.targets.base import Target
+```
+
+`Tools` is instantiated as `Tools(ctx)` where `ctx = ToolContext(target=target, output_cap_bytes=...)`.
+It is NOT a registry of scanners; do not write `Tools.semgrep` or `Tools.import_scanner`.
 
 # Constraints
 
