@@ -18,8 +18,17 @@ from s0_cli.harness.llm import have_provider_key
 
 
 @pytest.fixture
-def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Strip every provider key the loader knows about so tests start clean."""
+def clean_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[None]:
+    """Hermetic env: strip provider keys + redirect HOME + CWD to tmp.
+
+    The loader walks several standard locations (``./.env``,
+    ``~/.config/s0/.env``, ``~/.s0/.env``). To keep tests reproducible
+    across dev machines and CI, we point HOME at an empty tmp dir and
+    chdir into another empty tmp dir so only files the test creates
+    explicitly are visible.
+    """
     for key in (
         "OPENAI_API_KEY",
         "OPENAI_API_BASE",
@@ -36,8 +45,15 @@ def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         "AZURE_API_KEY",
         "AZURE_API_BASE",
         "AZURE_API_VERSION",
+        "S0_ENV_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
+    home = tmp_path / "home"
+    cwd = tmp_path / "cwd"
+    home.mkdir()
+    cwd.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(cwd)
     yield
 
 
@@ -100,6 +116,72 @@ def test_dotenv_loader_skips_unknown_keys(
     env.write_text("SOME_RANDOM_VAR=should-not-be-imported\n", encoding="utf-8")
     _load_dotenv_provider_keys(env)
     assert "SOME_RANDOM_VAR" not in os.environ
+
+
+def test_dotenv_loader_finds_xdg_config_path(clean_env: None) -> None:
+    """Standalone-binary case: no ./.env, key lives in ~/.config/s0/.env."""
+    home = Path(os.environ["HOME"])
+    cfg = home / ".config" / "s0"
+    cfg.mkdir(parents=True)
+    (cfg / ".env").write_text(
+        "OPENAI_API_KEY=sk-from-xdg\n", encoding="utf-8"
+    )
+    loaded = _load_dotenv_provider_keys()
+    assert os.environ["OPENAI_API_KEY"] == "sk-from-xdg"
+    assert any(p.name == ".env" and ".config/s0" in str(p) for p in loaded)
+
+
+def test_dotenv_loader_finds_dot_s0_path(clean_env: None) -> None:
+    """Alternate location ~/.s0/.env should also be picked up."""
+    home = Path(os.environ["HOME"])
+    cfg = home / ".s0"
+    cfg.mkdir()
+    (cfg / ".env").write_text(
+        "ANTHROPIC_API_KEY=sk-from-dot-s0\n", encoding="utf-8"
+    )
+    _load_dotenv_provider_keys()
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-from-dot-s0"
+
+
+def test_dotenv_loader_cwd_overrides_home(
+    clean_env: None, tmp_path: Path
+) -> None:
+    """./.env (project-local) wins over ~/.config/s0/.env (machine-wide)."""
+    home = Path(os.environ["HOME"])
+    (home / ".config" / "s0").mkdir(parents=True)
+    (home / ".config" / "s0" / ".env").write_text(
+        "OPENAI_API_KEY=from-home\n", encoding="utf-8"
+    )
+    Path(".env").write_text("OPENAI_API_KEY=from-cwd\n", encoding="utf-8")
+    _load_dotenv_provider_keys()
+    assert os.environ["OPENAI_API_KEY"] == "from-cwd"
+
+
+def test_dotenv_loader_explicit_path_wins(
+    clean_env: None, tmp_path: Path
+) -> None:
+    """An explicit path (e.g. --env-file) beats every default location."""
+    home = Path(os.environ["HOME"])
+    (home / ".config" / "s0").mkdir(parents=True)
+    (home / ".config" / "s0" / ".env").write_text(
+        "OPENAI_API_KEY=from-home\n", encoding="utf-8"
+    )
+    Path(".env").write_text("OPENAI_API_KEY=from-cwd\n", encoding="utf-8")
+    explicit = tmp_path / "custom.env"
+    explicit.write_text("OPENAI_API_KEY=from-explicit\n", encoding="utf-8")
+    _load_dotenv_provider_keys(explicit)
+    assert os.environ["OPENAI_API_KEY"] == "from-explicit"
+
+
+def test_s0_env_file_environment_variable(
+    clean_env: None, tmp_path: Path
+) -> None:
+    """`S0_ENV_FILE=/path/to/file` is honored even without --env-file."""
+    custom = tmp_path / "elsewhere.env"
+    custom.write_text("GROQ_API_KEY=sk-from-s0-env-file\n", encoding="utf-8")
+    os.environ["S0_ENV_FILE"] = str(custom)
+    _load_dotenv_provider_keys()
+    assert os.environ["GROQ_API_KEY"] == "sk-from-s0-env-file"
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 [project]
 name = "s0-cli"
-version = "0.3.0"
+version = "0.3.1"
 description = "Security-Zero CLI: a Meta-Harness-shaped agent for scanning code for security and vibe-code issues."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -29,6 +29,9 @@ dev = [
 ]
 mcp = [
     "mcp>=1.2",
+]
+build = [
+    "pyinstaller>=6.10",
 ]
 
 [project.scripts]

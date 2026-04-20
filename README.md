@@ -8,6 +8,33 @@ s0-cli demo
 
 ## Install
 
+Three options — pick whichever matches your workflow.
+
+### A. Standalone binary (no Python required)
+
+Pre-built single-file releases are attached to every [GitHub release](https://github.com/antonellof/s0-cli/releases/latest) for macOS (arm64 / x86_64), Linux (x86_64 / arm64), and Windows (x86_64). The binaries bundle Python + every LLM provider plugin — you only need to install the SAST scanners you want (`semgrep`, `bandit`, ... — see below).
+
+```bash
+# Linux / macOS (replace ARCH with your platform from the release page):
+curl -L https://github.com/antonellof/s0-cli/releases/latest/download/s0-linux-x86_64.tar.gz \
+  | tar -xz -C /usr/local/lib
+sudo ln -sf /usr/local/lib/s0-linux-x86_64/s0 /usr/local/bin/s0
+
+s0 version
+```
+
+```powershell
+# Windows (PowerShell)
+Invoke-WebRequest -Uri https://github.com/antonellof/s0-cli/releases/latest/download/s0-windows-x86_64.zip -OutFile s0.zip
+Expand-Archive .\s0.zip -DestinationPath $env:LOCALAPPDATA
+$env:Path += ";$env:LOCALAPPDATA\s0-windows-x86_64"
+s0 version
+```
+
+> **macOS first-launch note** — the binary is unsigned, so the first invocation may take 5–10 s while Gatekeeper validates the embedded `.dylib`s. Subsequent invocations start in ~0.3 s. To skip the prompt: `xattr -cr /usr/local/lib/s0-macos-arm64`.
+
+### B. From PyPI / source (recommended for development)
+
 ```bash
 git clone https://github.com/antonellof/s0-cli.git
 cd s0-cli
@@ -32,6 +59,25 @@ Set one of the supported providers in `.env` and a matching `S0_MODEL`. Everythi
 
 
 Any [litellm-supported model](https://docs.litellm.ai/docs/providers) works — `S0_MODEL` is passed through as-is.
+
+#### Configuring the standalone binary
+
+When you run `s0` from the standalone binary you usually don't have a project-local `.env`. Provider keys are resolved in this order (first hit wins):
+
+1. **Shell environment**: `OPENAI_API_KEY=sk-... s0 scan .` — works everywhere, ideal for CI.
+2. **`--env-file PATH`** (or short `-e PATH`): `s0 -e ~/secrets/s0.env scan .`
+3. **`S0_ENV_FILE`** environment variable pointing at a file.
+4. **`./.env`** in the current working directory.
+5. **`~/.config/s0/.env`** — the recommended location for the binary.
+6. **`~/.s0/.env`** — alternate alias.
+
+The same precedence applies to `S0_MODEL`, `S0_DEFAULT_HARNESS`, `S0_FAIL_ON`, etc. So a one-time setup for daily use looks like:
+
+```bash
+mkdir -p ~/.config/s0
+cp .env.example ~/.config/s0/.env       # edit + add your provider key
+s0 scan ./any/repo                      # works from any directory
+```
 
 System scanners are auto-discovered. Install whatever subset you want; missing ones are silently skipped:
 

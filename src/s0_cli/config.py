@@ -77,20 +77,51 @@ _PROVIDER_KEYS = (
 )
 
 
-def _load_dotenv_provider_keys(env_file: Path = Path(".env")) -> None:
-    """Best-effort: copy provider API keys from `.env` into `os.environ`.
+def _candidate_env_files(explicit: Path | None = None) -> list[Path]:
+    """Return env-file search paths, in priority order (first wins).
 
-    pydantic-settings only loads `S0_*` keys (env_prefix). litellm reads
-    provider keys directly from `os.environ`, so we need to forward them
-    ourselves. We do NOT overwrite an already-set environment variable.
-    Format is the standard `KEY=value` per line, with `#` comments allowed.
+    Resolved priority:
+      1. Explicit path passed via `--env-file` (CLI) or `S0_ENV_FILE`.
+      2. `./.env` in the current working directory (matches dev workflow).
+      3. `~/.config/s0/.env` (XDG-style, the recommended location for the
+         standalone binary).
+      4. `~/.s0/.env` (shorter alias).
+
+    All existing files are returned; the loader walks them in order and
+    only sets keys that are not already populated, so an explicit path
+    or the CWD `.env` always wins over the home-dir defaults.
     """
-    if not env_file.is_file():
-        return
+    paths: list[Path] = []
+    if explicit is not None:
+        paths.append(explicit)
+    env_var = os.environ.get("S0_ENV_FILE")
+    if env_var:
+        paths.append(Path(env_var).expanduser())
+    paths.append(Path(".env"))
+    home = Path.home()
+    paths.append(home / ".config" / "s0" / ".env")
+    paths.append(home / ".s0" / ".env")
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for p in paths:
+        try:
+            resolved = p.expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if resolved in seen or not resolved.is_file():
+            continue
+        seen.add(resolved)
+        out.append(resolved)
+    return out
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a `KEY=value` file. Lines starting with `#` are comments."""
+    out: dict[str, str] = {}
     try:
-        text = env_file.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except OSError:
-        return
+        return out
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -98,13 +129,45 @@ def _load_dotenv_provider_keys(env_file: Path = Path(".env")) -> None:
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if not value or key not in _PROVIDER_KEYS:
-            continue
-        if os.environ.get(key):
-            continue
-        os.environ[key] = value
+        if key:
+            out[key] = value
+    return out
 
 
-def get_settings() -> Settings:
-    _load_dotenv_provider_keys()
+def _load_dotenv_provider_keys(env_file: Path | None = None) -> list[Path]:
+    """Best-effort: copy provider API keys from `.env` files into `os.environ`.
+
+    pydantic-settings only loads `S0_*` keys (env_prefix). litellm reads
+    provider keys directly from `os.environ`, so we need to forward them
+    ourselves. We do NOT overwrite an already-set environment variable.
+
+    Searches (in priority order):
+      1. The path passed in via `env_file` (typically from the CLI's
+         `--env-file` flag).
+      2. `$S0_ENV_FILE` if set.
+      3. `./.env` in the current working directory.
+      4. `~/.config/s0/.env` and `~/.s0/.env` (recommended for the
+         standalone binary, where there is no project root).
+
+    Returns the list of files that were actually read, in case a caller
+    wants to log them. An empty list means no env file was found, which
+    is fine — the user might have exported the keys directly.
+    """
+    loaded: list[Path] = []
+    for path in _candidate_env_files(env_file):
+        parsed = _parse_env_file(path)
+        if not parsed:
+            continue
+        loaded.append(path)
+        for key, value in parsed.items():
+            if not value or key not in _PROVIDER_KEYS:
+                continue
+            if os.environ.get(key):
+                continue
+            os.environ[key] = value
+    return loaded
+
+
+def get_settings(env_file: Path | None = None) -> Settings:
+    _load_dotenv_provider_keys(env_file)
     return Settings()

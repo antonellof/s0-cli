@@ -23,7 +23,7 @@ _LEVEL_MAP = {
 }
 
 
-def to_sarif(findings: list[Finding], tool_name: str = "s0-cli", tool_version: str = "0.3.0") -> str:
+def to_sarif(findings: list[Finding], tool_name: str = "s0-cli", tool_version: str = "0.3.1") -> str:
     rules: dict[str, dict] = {}
     results: list[dict] = []
 

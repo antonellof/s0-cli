@@ -45,6 +45,35 @@ app.add_typer(runs_app, name="runs")
 console = Console()
 
 
+@app.callback()
+def _global_options(
+    env_file: Path | None = typer.Option(
+        None,
+        "--env-file",
+        "-e",
+        help=(
+            "Path to a .env file with provider keys (e.g. OPENAI_API_KEY). "
+            "Defaults to $S0_ENV_FILE, then ./.env, then ~/.config/s0/.env, "
+            "then ~/.s0/.env. Useful for the standalone binary, where you "
+            "may run `s0` from any directory."
+        ),
+    ),
+) -> None:
+    """Apply global options (env-file loading) before any subcommand runs."""
+    # Side effect: copy provider keys from the resolved env file into
+    # os.environ so that litellm + downstream code see them. We call this
+    # here rather than relying on the per-command `get_settings()` so that
+    # commands like `s0 doctor` (which reports provider-key presence) get
+    # the loaded values too.
+    if env_file is not None and not env_file.is_file():
+        raise typer.BadParameter(
+            f"--env-file path does not exist: {env_file}",
+            param_hint="--env-file",
+        )
+    from s0_cli.config import _load_dotenv_provider_keys
+    _load_dotenv_provider_keys(env_file)
+
+
 @app.command("version")
 def cmd_version() -> None:
     console.print(f"s0-cli {__version__}")
