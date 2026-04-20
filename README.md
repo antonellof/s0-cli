@@ -49,6 +49,23 @@ s0 version
 
 The bundle contains every LLM provider plugin (Anthropic / OpenAI / Gemini / OpenRouter / Ollama / Groq / Mistral / DeepSeek / Azure …); you only need to install the SAST scanners you want — `s0 doctor` reports which are present.
 
+After install, configure your LLM provider with the interactive wizard:
+
+```bash
+s0 init                  # asks for provider + API key, writes ~/.config/s0/.env
+s0 doctor                # confirms scanners + provider key are live
+s0 scan ./your/repo
+```
+
+The wizard also runs non-interactively for scripts/CI:
+
+```bash
+s0 init --non-interactive --provider openai --api-key "$OPENAI_API_KEY"
+# or pipe the curl installer with --init for one-shot setup:
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
+  | bash -s -- --init
+```
+
 Releases for macOS (arm64 / x86_64), Linux (x86_64 / arm64), and Windows (x86_64) are published on the [releases page](https://github.com/antonellof/s0-cli/releases/latest) if you'd rather download the tarball manually.
 
 > **macOS first-launch note** — the binary is unsigned, so the first invocation may take 5–10 s while Gatekeeper validates the embedded `.dylib`s. Subsequent invocations start in ~0.3 s. The installer strips the `com.apple.quarantine` xattr automatically.
@@ -91,12 +108,27 @@ When you run `s0` from the standalone binary you usually don't have a project-lo
 5. **`~/.config/s0/.env`** — the recommended location for the binary.
 6. **`~/.s0/.env`** — alternate alias.
 
-The same precedence applies to `S0_MODEL`, `S0_DEFAULT_HARNESS`, `S0_FAIL_ON`, etc. So a one-time setup for daily use looks like:
+The same precedence applies to `S0_MODEL`, `S0_DEFAULT_HARNESS`, `S0_FAIL_ON`, etc. The fastest one-time setup is the wizard:
+
+```bash
+s0 init                                  # interactive: pick provider, paste key
+s0 scan ./any/repo                       # works from any directory
+```
+
+`s0 init` writes a minimal `~/.config/s0/.env` with `0600` perms (owner-only). For unattended setup (Docker/CI/Ansible):
+
+```bash
+s0 init --non-interactive \
+  --provider anthropic \
+  --api-key "$ANTHROPIC_API_KEY" \
+  --model anthropic/claude-sonnet-4-5
+```
+
+Or, if you'd rather edit the file directly:
 
 ```bash
 mkdir -p ~/.config/s0
 cp .env.example ~/.config/s0/.env       # edit + add your provider key
-s0 scan ./any/repo                      # works from any directory
 ```
 
 System scanners are auto-discovered. Install whatever subset you want; missing ones are silently skipped:

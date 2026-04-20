@@ -135,23 +135,25 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 
 def _load_dotenv_provider_keys(env_file: Path | None = None) -> list[Path]:
-    """Best-effort: copy provider API keys from `.env` files into `os.environ`.
+    """Best-effort: forward `.env` keys into `os.environ`.
 
-    pydantic-settings only loads `S0_*` keys (env_prefix). litellm reads
-    provider keys directly from `os.environ`, so we need to forward them
-    ourselves. We do NOT overwrite an already-set environment variable.
+    Two classes of keys are forwarded:
 
-    Searches (in priority order):
-      1. The path passed in via `env_file` (typically from the CLI's
-         `--env-file` flag).
-      2. `$S0_ENV_FILE` if set.
-      3. `./.env` in the current working directory.
-      4. `~/.config/s0/.env` and `~/.s0/.env` (recommended for the
-         standalone binary, where there is no project root).
+    - **Provider API keys** (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
+      ``OLLAMA_API_BASE``, …): litellm reads these directly from the
+      process env, so without this side-channel they would be invisible
+      when the env file lives in ``~/.config/s0/.env`` (pydantic only
+      auto-loads ``./.env`` from the CWD).
+    - **``S0_*`` settings** (e.g. ``S0_MODEL``): pydantic-settings
+      *would* load them from ``./.env``, but again only from the CWD.
+      Forwarding them here means a user's home-dir config picks up the
+      same way the project-local ``./.env`` does — exactly what
+      ``s0 init`` writes to.
 
-    Returns the list of files that were actually read, in case a caller
-    wants to log them. An empty list means no env file was found, which
-    is fine — the user might have exported the keys directly.
+    We never overwrite an already-set environment variable, so an
+    explicit ``S0_MODEL=… s0 scan`` invocation always beats the file.
+
+    Returns the list of files that were actually read.
     """
     loaded: list[Path] = []
     for path in _candidate_env_files(env_file):
@@ -160,7 +162,12 @@ def _load_dotenv_provider_keys(env_file: Path | None = None) -> list[Path]:
             continue
         loaded.append(path)
         for key, value in parsed.items():
-            if not value or key not in _PROVIDER_KEYS:
+            if not value:
+                continue
+            # Forward provider keys (litellm) AND S0_* settings (pydantic),
+            # but nothing else — we don't want a user's .env to silently
+            # leak unrelated keys into the process env.
+            if key not in _PROVIDER_KEYS and not key.startswith("S0_"):
                 continue
             if os.environ.get(key):
                 continue

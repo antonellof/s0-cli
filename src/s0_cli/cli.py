@@ -18,6 +18,7 @@ from s0_cli.eval.validate import validate_harness
 from s0_cli.harness.llm import have_provider_key
 from s0_cli.harness.progress import emit as emit_progress
 from s0_cli.harness.progress import reset_sink, set_sink
+from s0_cli.init_cmd import cmd_init
 from s0_cli.report import (
     to_csv,
     to_gitlab_codequality,
@@ -77,6 +78,11 @@ def _global_options(
 @app.command("version")
 def cmd_version() -> None:
     console.print(f"s0-cli {__version__}")
+
+
+# Interactive `.env` wizard. Implementation lives in `init_cmd` to keep this
+# file focused on top-level wiring.
+app.command("init")(cmd_init)
 
 
 SCANNER_DESCRIPTIONS: dict[str, str] = {

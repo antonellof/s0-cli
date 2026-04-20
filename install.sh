@@ -17,11 +17,17 @@
 #     --bin-dir DIR        Override just the bin dir (default: $PREFIX/bin).
 #     --lib-dir DIR        Override just the lib dir (default: $PREFIX/lib).
 #     --skip-verify        Skip SHA-256 verification (not recommended).
+#     --init               After install, run `s0 init` to write a config
+#                          file (interactive). Skipped automatically when
+#                          stdin is not a TTY (e.g. piped from curl).
+#     --no-init            Never prompt to run `s0 init`.
 #     --uninstall          Remove a previously installed s0.
 #     --help               Show this help and exit.
 #
 # Environment overrides (alternative to flags):
 #     S0_VERSION  S0_PREFIX  S0_BIN_DIR  S0_LIB_DIR
+#     S0_INIT=1            Same as --init.
+#     S0_INIT=0            Same as --no-init.
 
 set -euo pipefail
 
@@ -36,6 +42,8 @@ BIN_DIR="${S0_BIN_DIR:-}"
 LIB_DIR="${S0_LIB_DIR:-}"
 SKIP_VERIFY=0
 UNINSTALL=0
+# 1 = always run, 0 = never run, "" = auto (prompt only on a TTY)
+RUN_INIT="${S0_INIT:-}"
 
 # ----- helpers ------------------------------------------------------------
 err()  { printf '\033[31merror\033[0m: %s\n' "$*" >&2; }
@@ -90,6 +98,8 @@ while [ "$#" -gt 0 ]; do
     --bin-dir)     BIN_DIR="$2";   shift 2;;
     --lib-dir)     LIB_DIR="$2";   shift 2;;
     --skip-verify) SKIP_VERIFY=1;  shift;;
+    --init)        RUN_INIT=1;     shift;;
+    --no-init)     RUN_INIT=0;     shift;;
     --uninstall)   UNINSTALL=1;    shift;;
     -h|--help)     usage; exit 0;;
     *) die "unknown flag: $1 (try --help)";;
@@ -235,15 +245,51 @@ else
   log "or invoke directly: ${bin_dst} version"
 fi
 
-cat <<EOF
+# Decide whether to launch the config wizard.
+#   RUN_INIT=1  → always
+#   RUN_INIT=0  → never
+#   RUN_INIT="" → ask if we have a TTY, otherwise skip silently
+should_init=0
+case "$RUN_INIT" in
+  1) should_init=1 ;;
+  0) should_init=0 ;;
+  "")
+    # `curl … | bash` doesn't have a TTY on stdin. Don't trap users
+    # there with an unanswerable y/n prompt — print the manual steps
+    # instead. They can re-run with `--init` if they want the wizard.
+    if [ -t 0 ] && [ -t 1 ]; then
+      printf '\n\033[1m? Run `s0 init` now to set up your LLM provider + API key?\033[0m [Y/n] '
+      read -r ans </dev/tty || ans="n"
+      case "$ans" in
+        n|N|no|NO) should_init=0 ;;
+        *)         should_init=1 ;;
+      esac
+    fi
+    ;;
+esac
+
+if [ "$should_init" = "1" ]; then
+  if [ "$on_path" = "1" ]; then
+    "$bin_dst" init || warn "s0 init exited non-zero — re-run it manually with: $bin_dst init"
+  else
+    "$bin_dst" init || warn "s0 init exited non-zero — re-run it manually with: $bin_dst init"
+  fi
+  cat <<EOF
+
+ready: scan something with  s0 scan ./your/repo
+docs:  https://github.com/${REPO}#readme
+EOF
+else
+  cat <<EOF
 
 next steps:
   1) install scanners you want (semgrep, bandit, trivy, ...)  — see 's0 doctor'
-  2) configure a provider key (any one of):
+  2) configure a provider key, either with the wizard or by hand:
+       - ${bin_dst} init                     ← interactive setup (recommended)
        - export OPENAI_API_KEY=sk-...
        - mkdir -p ~/.config/s0 && cp .env.example ~/.config/s0/.env
-       - s0 --env-file /path/to/.env scan ./repo
   3) scan something:  s0 scan ./your/repo
 
 docs: https://github.com/${REPO}#readme
 EOF
+fi
