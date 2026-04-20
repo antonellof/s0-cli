@@ -271,6 +271,7 @@ def list_scanners() -> dict[str, Any]:
         "gitleaks": "Gitleaks for committed secrets",
         "trivy": "Trivy filesystem scan (vuln'd dependencies, IaC, config)",
         "hallucinated_import": "LLM detector for imports that don't exist on PyPI / npm",
+        "supply_chain": "OSV-Scanner + OpenSSF Scorecard + guarddog (CVEs, repo trust, malicious packages)",
         "vibe_llm": "LLM detector for stub auth, dummy crypto, prompt-injection sinks",
     }
     return {

@@ -46,6 +46,7 @@ class BaselineV0Agentic(Harness):
         "gitleaks",
         "trivy",
         "hallucinated_import",
+        "supply_chain",
         "vibe_llm",
     )
 

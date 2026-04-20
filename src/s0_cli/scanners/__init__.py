@@ -16,6 +16,7 @@ from s0_cli.scanners.gitleaks import GitleaksScanner
 from s0_cli.scanners.hallucinated_import import HallucinatedImportScanner
 from s0_cli.scanners.ruff import RuffScanner
 from s0_cli.scanners.semgrep import SemgrepScanner
+from s0_cli.scanners.supply_chain import SupplyChainScanner
 from s0_cli.scanners.trivy import TrivyScanner
 from s0_cli.scanners.vibe import VibeLLMScanner
 
@@ -26,6 +27,7 @@ REGISTRY: dict[str, type[Scanner]] = {
     "trivy": TrivyScanner,
     "ruff": RuffScanner,
     "hallucinated_import": HallucinatedImportScanner,
+    "supply_chain": SupplyChainScanner,
     "vibe_llm": VibeLLMScanner,
 }
 

@@ -39,6 +39,12 @@ System scanners are auto-discovered. Install whatever subset you want; missing o
 brew install semgrep gitleaks trivy
 uv tool install bandit
 uv tool install ruff
+
+# Optional supply-chain backends (each independently optional):
+brew install osv-scanner                # OSV-Scanner — broader CVE coverage than Trivy on OSS lockfiles
+go install github.com/ossf/scorecard/v5@latest   # OpenSSF Scorecard — repo trust signals
+uv tool install guarddog                # guarddog — flags malicious PyPI packages
+
 uv run s0 doctor          # confirms which scanners + LLM keys are live
 uv run s0 scanners        # one-line description of every available scanner
 ```
@@ -257,32 +263,62 @@ Running a single static scanner gives you a wall of JSON; you still have to read
 
 `s0 scan` runs every installed scanner on the target in parallel, deduplicates findings across them by `(path, line, rule_id)`, and hands the result to the inner harness — a multi-turn LLM agent with a tightly scoped tool surface. The agent reads source, greps for taint, blames git history, re-runs scanners with tighter rules, then either accepts each finding (assigning a severity and a `fix_hint`) or marks it as a false positive. Everything it does — the prompt, every tool call, every LLM response — is recorded under `runs/<timestamp>__<harness>__<id>/` so any scan is reproducible and auditable.
 
-Two scanning agents ship out of the box:
+Three scanning agents ship out of the box:
 
 
-| Harness                         | Turns | Use                                            |
-| ------------------------------- | ----- | ---------------------------------------------- |
-| `baseline_v0_agentic` (default) | ≤30   | full investigation (read source, taint, dedup) |
-| `baseline_v0_singleshot`        | 1     | cheap pre-filter / CI fast path                |
+| Harness                         | Turns | Strategy                                       | Use                                            |
+| ------------------------------- | ----- | ---------------------------------------------- | ---------------------------------------------- |
+| `baseline_v0_agentic` (default) | ≤30   | triage findings from 8 classic + AI detectors  | full investigation (read source, taint, dedup) |
+| `baseline_v0_singleshot`        | 1     | one-shot triage of semgrep candidates          | cheap pre-filter / CI fast path                |
+| `vulnhunter_v0`                 | ≤25   | LLM hunts novel classes (no scanner seeds)     | find SSRF / IDOR / RCE / auth bypass / TOCTOU  |
 
 
-Pick one with `--harness <name>` or set `S0_DEFAULT_HARNESS` in `.env`.
+Pick one with `--harness <name>` or set `S0_DEFAULT_HARNESS` in `.env`. Run them in sequence (`s0 scan --harness baseline_v0_agentic && s0 scan --harness vulnhunter_v0`) when you want both "calibrate the known" and "find the unknown".
 
 ### Detectors
 
+s0-cli ships with two flavors of detector. **Classic / AST** detectors catch known vulnerability classes that someone has already written rules for. **AI / supply-chain** detectors catch the long tail: AI-hallucinated code, intent-level smells, malicious dependencies, and untrustworthy upstream repos.
 
-| Detector              | Catches                                                         | Kind         |
-| --------------------- | --------------------------------------------------------------- | ------------ |
-| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic      |
-| `bandit`              | Python security smells (B-codes)                                | classic      |
-| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation              | classic      |
-| `gitleaks`            | secrets in source (matched values redacted in logs)             | classic      |
-| `trivy fs`            | filesystem vulns, secrets, misconfigurations                    | classic      |
-| `hallucinated_import` | imports that aren't stdlib, declared, or local                  | AST          |
-| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...               | LLM detector |
+
+| Detector              | Catches                                                         | Kind                |
+| --------------------- | --------------------------------------------------------------- | ------------------- |
+| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic             |
+| `bandit`              | Python security smells (B-codes)                                | classic             |
+| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation              | classic             |
+| `gitleaks`            | secrets in source (matched values redacted in logs)             | classic             |
+| `trivy fs`            | filesystem vulns, secrets, misconfigurations                    | classic             |
+| `hallucinated_import` | imports that aren't stdlib, declared, or local                  | AST                 |
+| `supply_chain`        | OSV-Scanner CVEs + OpenSSF Scorecard trust + guarddog malware   | supply chain        |
+| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...               | LLM detector        |
 
 
 Findings from every detector flow into the same agent loop, which decides what to keep, what to flag as a false positive, and what severity to report. All raw scanner output, every LLM call, and every tool invocation is recorded under `runs/` for replay and audit.
+
+#### Hunting unknown vulnerability classes
+
+Pattern-matching SAST is bounded by what the rule authors thought of. To go beyond that, s0-cli ships two complementary strategies for *novelty*:
+
+- **`supply_chain` scanner** composes three OSS tools that catch supply-chain risk Trivy alone misses:
+  - **OSV-Scanner** queries `osv.dev` for CVEs/GHSAs across pip, npm, cargo, go, maven, composer, gem (broader coverage than Trivy on OSS lockfiles).
+  - **OpenSSF Scorecard** scores the upstream GitHub repo's *trustworthiness* — unsigned releases, missing branch protection, dead maintainers, no SECURITY.md. None of these are CVEs; all of them predict future incidents.
+  - **guarddog** runs heuristic rules against PyPI packages to flag *actively malicious* code (install-time exec, exfil endpoints, typosquats, base64-encoded payloads).
+
+  Each backend is independently optional — install the binary you have and skip the rest. `s0 scanners` shows which are wired.
+
+- **`vulnhunter_v0` harness** is an LLM-driven novelty hunter that doesn't consume scanner seeds. It reads the codebase top-down, maps every HTTP / queue / webhook entry point, and traces tainted-data flow into eight specific bug classes:
+
+  | Class                                | CWE     |
+  | ------------------------------------ | ------- |
+  | SSRF via webhooks / image proxies    | CWE-918 |
+  | Indirect RCE (SSTI, deserialization) | CWE-94, CWE-502 |
+  | IDOR / broken object-level authz     | CWE-639 |
+  | Authentication / session bypass      | CWE-287 |
+  | Race conditions / TOCTOU             | CWE-367 |
+  | Mass-assignment / unsafe ORM use     | CWE-915 |
+  | Crypto mistakes (IV reuse, weak HMAC compare) | CWE-327 |
+  | Path traversal through subtle joins  | CWE-22  |
+
+  These are application-logic bugs that depend on *how the pieces compose*, which pattern matchers can't see. Run with `s0 scan PATH --harness vulnhunter_v0` (LLM-required; no `--no-llm` fallback by design).
 
 ## Configuration
 

@@ -57,6 +57,7 @@ SCANNER_DESCRIPTIONS: dict[str, str] = {
     "gitleaks": "Secret detection in source + git history",
     "trivy": "Dependency CVEs, IaC misconfigs, container/secret scan",
     "hallucinated_import": "Detects imports of non-existent / typo-squatted packages",
+    "supply_chain": "OSV-Scanner + OpenSSF Scorecard + guarddog (CVEs, repo trust, malicious pkgs)",
     "vibe_llm": "LLM-driven detector for intent-level vibe-code issues",
 }
 
