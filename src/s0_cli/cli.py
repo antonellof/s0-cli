@@ -344,14 +344,6 @@ def cmd_optimize(
     )
 
 
-def main() -> None:
-    app()
-
-
-if __name__ == "__main__":
-    main()
-
-
 def _render(findings, fmt: str, label: str) -> str:
     if fmt == "json":
         return to_json(findings)
@@ -360,3 +352,11 @@ def _render(findings, fmt: str, label: str) -> str:
     if fmt == "markdown":
         return to_markdown(findings, target_label=label)
     raise typer.BadParameter(f"Unknown format: {fmt}")
+
+
+def main() -> None:
+    app()
+
+
+if __name__ == "__main__":
+    main()

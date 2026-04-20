@@ -194,11 +194,36 @@ def _stub_response(tools: list[dict[str, Any]] | None) -> LLMResponse:
 
 
 def have_provider_key(model: str) -> bool:
-    """Best-effort check that an API key is present for the given model."""
+    """Best-effort check that an API key is present for the given model.
+
+    Returns ``True`` for providers that don't strictly require a key (notably
+    a local Ollama install) so ``s0 doctor`` doesn't false-flag them.
+    """
     if model.startswith("anthropic/"):
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
     if model.startswith("openai/") or model.startswith("gpt-"):
-        return bool(os.environ.get("OPENAI_API_KEY"))
+        # OpenAI-compatible self-hosted endpoints (vLLM, llama.cpp, LM Studio,
+        # …) speak the openai/ schema with OPENAI_API_BASE pointed at the
+        # local URL — they don't always require a real key.
+        return bool(
+            os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENAI_API_BASE")
+        )
     if model.startswith("gemini/") or model.startswith("vertex_ai/"):
         return bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    if model.startswith("openrouter/"):
+        return bool(os.environ.get("OPENROUTER_API_KEY"))
+    if model.startswith("ollama/") or model.startswith("ollama_chat/"):
+        # Local Ollama needs no key. Cloud-hosted Ollama proxies that require
+        # OLLAMA_API_KEY will still fail at request time with a clear 401, so
+        # we don't gate on it here.
+        return True
+    if model.startswith("groq/"):
+        return bool(os.environ.get("GROQ_API_KEY"))
+    if model.startswith("mistral/"):
+        return bool(os.environ.get("MISTRAL_API_KEY"))
+    if model.startswith("deepseek/"):
+        return bool(os.environ.get("DEEPSEEK_API_KEY"))
+    if model.startswith("azure/"):
+        return bool(os.environ.get("AZURE_API_KEY") and os.environ.get("AZURE_API_BASE"))
     return True

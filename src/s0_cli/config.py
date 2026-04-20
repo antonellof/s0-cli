@@ -51,6 +51,7 @@ class Settings(BaseSettings):
 
 
 _PROVIDER_KEYS = (
+    # Hosted providers
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
@@ -58,10 +59,21 @@ _PROVIDER_KEYS = (
     "GROQ_API_KEY",
     "MISTRAL_API_KEY",
     "DEEPSEEK_API_KEY",
+    # OpenRouter — gateway to ~100 hosted models
+    # https://openrouter.ai/docs#models
     "OPENROUTER_API_KEY",
+    "OPENROUTER_API_BASE",  # default: https://openrouter.ai/api/v1
+    # Azure OpenAI
     "AZURE_API_KEY",
     "AZURE_API_BASE",
     "AZURE_API_VERSION",
+    # Ollama — local (default http://localhost:11434) or cloud-hosted
+    # https://docs.litellm.ai/docs/providers/ollama
+    "OLLAMA_API_BASE",
+    "OLLAMA_API_KEY",
+    # OpenAI-compatible self-hosted endpoints (vLLM, llama.cpp, LM Studio, …).
+    # Use S0_MODEL=openai/<model> + OPENAI_API_BASE=<url>.
+    "OPENAI_API_BASE",
 )
 
 

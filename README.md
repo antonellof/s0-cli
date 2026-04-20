@@ -30,7 +30,20 @@ uv sync                    # Python 3.12+, uv >= 0.5
 cp .env.example .env       # then fill in one provider key
 ```
 
-Set one of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY` and the matching `S0_MODEL` (default: `anthropic/claude-sonnet-4-5`). Everything in `.env` is loaded automatically.
+Set one of the supported providers in `.env` and a matching `S0_MODEL`. Everything in `.env` is loaded automatically:
+
+| Provider | `S0_MODEL` example | Required env |
+| - | - | - |
+| Anthropic | `anthropic/claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-4o-mini` | `OPENAI_API_KEY` |
+| Gemini | `gemini/gemini-1.5-flash` | `GEMINI_API_KEY` |
+| **OpenRouter** *(gateway to ~100 hosted models)* | `openrouter/anthropic/claude-3.5-sonnet` | `OPENROUTER_API_KEY` (+ optional `OPENROUTER_API_BASE`) |
+| **Ollama (local)** | `ollama/llama3.1` | none — uses `http://localhost:11434` |
+| **Ollama (cloud / remote)** | `ollama_chat/qwen2.5-coder` | `OLLAMA_API_BASE=https://…` (+ `OLLAMA_API_KEY` if proxied) |
+| **Self-hosted OpenAI-compatible** *(vLLM, llama.cpp, LM Studio)* | `openai/your-model` | `OPENAI_API_BASE=http://localhost:8000/v1` |
+| Groq, Mistral, DeepSeek, Azure OpenAI | see `.env.example` | provider-specific |
+
+Any [litellm-supported model](https://docs.litellm.ai/docs/providers) works — `S0_MODEL` is passed through as-is.
 
 System scanners are auto-discovered. Install whatever subset you want; missing ones are silently skipped:
 
