@@ -63,6 +63,19 @@ class RichProgressSink:
     def __init__(self, console: Console, *, verbose: bool = False) -> None:
         self.console = console
         self.verbose = verbose
+        # Sibling console used only for verbose timeline lines. We turn
+        # `log_path=False` so Rich does NOT append the "progress.py:100"
+        # caller annotation to every event — that annotation is a Rich
+        # debugging convenience but pure noise for our users. The
+        # timestamp is kept.  We share the user console's stream so the
+        # spinner and the log lines render on the same stderr.
+        self._log_console = Console(
+            file=getattr(console, "file", None),
+            stderr=getattr(console, "stderr", True),
+            force_terminal=console.is_terminal,
+            color_system=console.color_system,
+            log_path=False,
+        )
         self._status: Status | None = None
         self._current_phase: str | None = None
         self._scanner_total = 0
@@ -97,7 +110,7 @@ class RichProgressSink:
 
     def _log(self, msg: str) -> None:
         if self.verbose:
-            self.console.log(msg)
+            self._log_console.log(msg)
 
     def _handle(self, event: str, f: dict[str, Any]) -> None:
         if event == "phase_start":
