@@ -36,7 +36,8 @@ System scanners are auto-discovered. Install whatever subset you want; missing o
 
 ```bash
 brew install semgrep gitleaks trivy
-uv tool install bandit ruff
+uv tool install bandit
+uv tool install ruff
 uv run s0 doctor          # confirms which scanners + LLM keys are live
 ```
 
