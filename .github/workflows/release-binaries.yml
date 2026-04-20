@@ -12,7 +12,13 @@ name: Release standalone binaries
 on:
   push:
     tags:
-      - "v*"
+      # Match semver tags only (`v1.2.3`, `v1.2.3-rc1`) so that the
+      # floating "latest major" tags we re-point on every release —
+      # `v0`, `v1`, … — do not double-fire this expensive 5-platform
+      # build. The release the binaries get attached to is always the
+      # semver one anyway.
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
   workflow_dispatch:
 
 permissions:

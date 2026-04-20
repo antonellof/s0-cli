@@ -8,19 +8,35 @@ s0-cli demo
 
 ## Install
 
+```bash
+# Standalone binary (Linux / macOS) — no Python needed
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh | bash
+```
+
 Three options — pick whichever matches your workflow.
 
 ### A. Standalone binary (no Python required)
 
-Pre-built single-file releases are attached to every [GitHub release](https://github.com/antonellof/s0-cli/releases/latest) for macOS (arm64 / x86_64), Linux (x86_64 / arm64), and Windows (x86_64). The binaries bundle Python + every LLM provider plugin — you only need to install the SAST scanners you want (`semgrep`, `bandit`, ... — see below).
+One-liner — autodetects your OS/arch, picks the right asset from the latest release, verifies its SHA-256, and installs `s0` onto your `$PATH`:
 
 ```bash
-# Linux / macOS (replace ARCH with your platform from the release page):
-curl -L https://github.com/antonellof/s0-cli/releases/latest/download/s0-linux-x86_64.tar.gz \
-  | tar -xz -C /usr/local/lib
-sudo ln -sf /usr/local/lib/s0-linux-x86_64/s0 /usr/local/bin/s0
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh | bash
+```
 
-s0 version
+Common variations:
+
+```bash
+# Pin a specific version
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
+  | bash -s -- --version v0.3.1
+
+# Install into your home (no sudo)
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
+  | bash -s -- --prefix "$HOME/.local"
+
+# Uninstall later
+curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
+  | bash -s -- --uninstall
 ```
 
 ```powershell
@@ -31,7 +47,11 @@ $env:Path += ";$env:LOCALAPPDATA\s0-windows-x86_64"
 s0 version
 ```
 
-> **macOS first-launch note** — the binary is unsigned, so the first invocation may take 5–10 s while Gatekeeper validates the embedded `.dylib`s. Subsequent invocations start in ~0.3 s. To skip the prompt: `xattr -cr /usr/local/lib/s0-macos-arm64`.
+The bundle contains every LLM provider plugin (Anthropic / OpenAI / Gemini / OpenRouter / Ollama / Groq / Mistral / DeepSeek / Azure …); you only need to install the SAST scanners you want — `s0 doctor` reports which are present.
+
+Releases for macOS (arm64 / x86_64), Linux (x86_64 / arm64), and Windows (x86_64) are published on the [releases page](https://github.com/antonellof/s0-cli/releases/latest) if you'd rather download the tarball manually.
+
+> **macOS first-launch note** — the binary is unsigned, so the first invocation may take 5–10 s while Gatekeeper validates the embedded `.dylib`s. Subsequent invocations start in ~0.3 s. The installer strips the `com.apple.quarantine` xattr automatically.
 
 ### B. From PyPI / source (recommended for development)
 
