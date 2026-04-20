@@ -4,21 +4,7 @@ An LLM-driven command-line agent for finding security vulnerabilities and "vibe-
 
 s0-cli runs a hybrid of classic static scanners (`semgrep`, `bandit`, `ruff`, `gitleaks`, `trivy`) and LLM detectors, then uses a multi-turn agent to triage, deduplicate, recalibrate severity, and explain each finding. The whole scanning agent is itself optimizable: `s0 optimize` runs a [Meta-Harness](https://yoonholee.com/meta-harness/) outer loop that mutates the agent against a labeled benchmark with a held-out test set.
 
-```
-$ uv run s0 scan ./my-app
-
-  hallucinated import           src/email.py:8       critical   CWE-829
-    `import emailclient` — no such package on PyPI; nearest match is
-    `emailclient-aws` (likely typosquat). Suggest pinning `email-validator`.
-
-  SQL injection (f-string)      src/api/users.py:42  critical   CWE-89
-    `cur.execute(f"SELECT … {user_id}")`. Use `cur.execute("… ?", (user_id,))`.
-
-  weak password hashing         src/auth/hash.py:7   high       CWE-327
-    `hashlib.md5(...)` for password storage. Use `argon2-cffi` or `bcrypt`.
-
-3 findings (1 critical hidden as triage filtered out 6 false positives)
-```
+![s0-cli demo](docs/img/demo.gif)
 
 ## Install
 
