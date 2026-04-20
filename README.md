@@ -54,6 +54,15 @@ brew install semgrep gitleaks trivy
 uv tool install bandit
 uv tool install ruff
 uv run s0 doctor          # confirms which scanners + LLM keys are live
+uv run s0 scanners        # one-line description of every available scanner
+```
+
+Restrict or exclude scanners per-scan:
+
+```bash
+uv run s0 scan ./repo --scanner semgrep --scanner bandit       # only these two
+uv run s0 scan ./repo -s semgrep                               # short form
+uv run s0 scan ./repo --exclude-scanner trivy -x gitleaks      # use defaults minus these
 ```
 
 ## Quickstart

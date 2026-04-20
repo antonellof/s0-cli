@@ -42,6 +42,94 @@ def cmd_version() -> None:
     console.print(f"s0-cli {__version__}")
 
 
+SCANNER_DESCRIPTIONS: dict[str, str] = {
+    "semgrep": "AST pattern matching across 30+ languages (default ruleset)",
+    "bandit": "Python-specific AST checks (CWE-bound)",
+    "ruff": "Python lint + 'S' security rules (PEP-8 + bandit overlap)",
+    "gitleaks": "Secret detection in source + git history",
+    "trivy": "Dependency CVEs, IaC misconfigs, container/secret scan",
+    "hallucinated_import": "Detects imports of non-existent / typo-squatted packages",
+    "vibe_llm": "LLM-driven detector for intent-level vibe-code issues",
+}
+
+
+def _resolve_scanner_selection(
+    *,
+    harness_default: tuple[str, ...],
+    include: list[str] | None,
+    exclude: list[str] | None,
+) -> tuple[str, ...]:
+    """Apply --scanner / --exclude-scanner against the harness defaults."""
+    if include and exclude:
+        raise typer.BadParameter(
+            "Use either --scanner or --exclude-scanner, not both."
+        )
+
+    valid = set(SCANNER_REGISTRY.keys())
+
+    if include is not None:
+        unknown = [s for s in include if s not in valid]
+        if unknown:
+            raise typer.BadParameter(
+                f"Unknown scanner(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(sorted(valid))}"
+            )
+        # Preserve user-supplied order, drop duplicates.
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for s in include:
+            if s not in seen:
+                seen.add(s)
+                ordered.append(s)
+        return tuple(ordered)
+
+    if exclude is not None:
+        unknown = [s for s in exclude if s not in valid]
+        if unknown:
+            raise typer.BadParameter(
+                f"Unknown scanner(s): {', '.join(unknown)}. "
+                f"Available: {', '.join(sorted(valid))}"
+            )
+        excluded = set(exclude)
+        return tuple(s for s in harness_default if s not in excluded)
+
+    return harness_default
+
+
+@app.command("scanners")
+def cmd_scanners() -> None:
+    """List every available scanner, whether it's installed, and a one-liner."""
+    table = Table(title="s0 scanners")
+    table.add_column("name", style="bold")
+    table.add_column("installed")
+    table.add_column("path / type")
+    table.add_column("description")
+
+    for name, cls in SCANNER_REGISTRY.items():
+        sc = cls()
+        ok = sc.is_available()
+        # External CLI tools live on $PATH; built-in detectors don't.
+        ext = shutil.which(name)
+        if ext:
+            location = ext
+        elif ok:
+            location = "(built-in)"
+        else:
+            location = "-"
+        table.add_row(
+            name,
+            "[green]yes[/green]" if ok else "[red]no[/red]",
+            location,
+            SCANNER_DESCRIPTIONS.get(name, ""),
+        )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Use[/dim] [cyan]s0 scan PATH --scanner semgrep --scanner bandit[/cyan] "
+        "[dim]to restrict, or[/dim] [cyan]--exclude-scanner trivy[/cyan] [dim]to skip one.[/dim]"
+    )
+
+
 @app.command("doctor")
 def cmd_doctor() -> None:
     """Sanity check: scanners installed, env keys present, runs dir writable."""
@@ -101,6 +189,22 @@ def cmd_scan(
         "--no-progress",
         help="Disable the live status spinner. Implied by --quiet.",
     ),
+    scanners: list[str] | None = typer.Option(
+        None,
+        "--scanner",
+        "-s",
+        help=(
+            "Restrict to specific scanners (repeatable). "
+            "Default: whatever the harness ships with. "
+            "Use `s0 scanners` to list all available."
+        ),
+    ),
+    exclude_scanners: list[str] | None = typer.Option(
+        None,
+        "--exclude-scanner",
+        "-x",
+        help="Skip these scanners (repeatable). Cannot be combined with --scanner.",
+    ),
 ) -> None:
     """Scan a target with the configured inner harness."""
     settings = get_settings()
@@ -120,6 +224,15 @@ def cmd_scan(
     h = load_harness_by_name(harness_name)
     if no_llm and hasattr(h, "with_no_llm"):
         h.with_no_llm()
+
+    selected = _resolve_scanner_selection(
+        harness_default=tuple(getattr(h, "default_scanners", ()) or ()),
+        include=scanners or None,
+        exclude=exclude_scanners or None,
+    )
+    if selected != tuple(getattr(h, "default_scanners", ())):
+        # Per-instance override; doesn't touch the class default.
+        h.default_scanners = selected
 
     if not quiet:
         console.print(
