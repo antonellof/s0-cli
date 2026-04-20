@@ -7,7 +7,7 @@
 #
 # Pin a version, install into ~/.local without sudo:
 #     curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
-#       | bash -s -- --version v0.3.1 --prefix "$HOME/.local"
+#       | bash -s -- --version v0.3.2 --prefix "$HOME/.local"
 #
 # Flags:
 #     --version VERSION    Install a specific tag (default: latest GitHub release).

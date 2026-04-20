@@ -28,7 +28,7 @@ Common variations:
 ```bash
 # Pin a specific version
 curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \
-  | bash -s -- --version v0.3.1
+  | bash -s -- --version v0.3.2
 
 # Install into your home (no sudo)
 curl -fsSL https://raw.githubusercontent.com/antonellof/s0-cli/main/install.sh \

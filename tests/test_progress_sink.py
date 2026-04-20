@@ -49,11 +49,16 @@ def test_reset_sink_restores_silence() -> None:
 
 
 def test_rich_progress_sink_handles_phase_and_scanner_events() -> None:
+    import io
+
     from rich.console import Console
 
     from s0_cli.ui.progress import RichProgressSink
 
-    console = Console(force_terminal=False, record=True, width=120)
+    # Shared buffer so we capture both the main console (status spinner output)
+    # and the sibling log console used for verbose timeline lines.
+    buf = io.StringIO()
+    console = Console(file=buf, force_terminal=False, width=120)
     with RichProgressSink(console, verbose=True) as sink:
         sink("phase_start", {"name": "seed_scanners", "scanners": ["semgrep", "bandit"]})
         sink("scanner_start", {"name": "semgrep", "index": 1, "total": 2})
@@ -89,7 +94,7 @@ def test_rich_progress_sink_handles_phase_and_scanner_events() -> None:
         )
         sink("tool_call_done", {"turn": 1, "name": "read_file", "duration_ms": 12})
 
-    output = console.export_text()
+    output = buf.getvalue()
     assert "semgrep" in output
     assert "bandit" in output
     assert "read_file" in output
