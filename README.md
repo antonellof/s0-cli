@@ -32,16 +32,18 @@ cp .env.example .env       # then fill in one provider key
 
 Set one of the supported providers in `.env` and a matching `S0_MODEL`. Everything in `.env` is loaded automatically:
 
-| Provider | `S0_MODEL` example | Required env |
-| - | - | - |
-| Anthropic | `anthropic/claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/gpt-4o-mini` | `OPENAI_API_KEY` |
-| Gemini | `gemini/gemini-1.5-flash` | `GEMINI_API_KEY` |
-| **OpenRouter** *(gateway to ~100 hosted models)* | `openrouter/anthropic/claude-3.5-sonnet` | `OPENROUTER_API_KEY` (+ optional `OPENROUTER_API_BASE`) |
-| **Ollama (local)** | `ollama/llama3.1` | none — uses `http://localhost:11434` |
-| **Ollama (cloud / remote)** | `ollama_chat/qwen2.5-coder` | `OLLAMA_API_BASE=https://…` (+ `OLLAMA_API_KEY` if proxied) |
-| **Self-hosted OpenAI-compatible** *(vLLM, llama.cpp, LM Studio)* | `openai/your-model` | `OPENAI_API_BASE=http://localhost:8000/v1` |
-| Groq, Mistral, DeepSeek, Azure OpenAI | see `.env.example` | provider-specific |
+
+| Provider                                                         | `S0_MODEL` example                       | Required env                                                |
+| ---------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------- |
+| Anthropic                                                        | `anthropic/claude-sonnet-4-6`            | `ANTHROPIC_API_KEY`                                         |
+| OpenAI                                                           | `openai/gpt-5o-mini`                     | `OPENAI_API_KEY`                                            |
+| Gemini                                                           | `gemini/gemini-2.5-flash`                | `GEMINI_API_KEY`                                            |
+| **OpenRouter** *(gateway to ~100 hosted models)*                 | `openrouter/anthropic/claude-sonnet-4.6` | `OPENROUTER_API_KEY` (+ optional `OPENROUTER_API_BASE`)     |
+| **Ollama (local)**                                               | `ollama/llama3.1`                        | none — uses `http://localhost:11434`                        |
+| **Ollama (cloud / remote)**                                      | `ollama_chat/qwen2.5-coder`              | `OLLAMA_API_BASE=https://…` (+ `OLLAMA_API_KEY` if proxied) |
+| **Self-hosted OpenAI-compatible** *(vLLM, llama.cpp, LM Studio)* | `openai/your-model`                      | `OPENAI_API_BASE=http://localhost:8000/v1`                  |
+| Groq, Mistral, DeepSeek, Azure OpenAI                            | see `.env.example`                       | provider-specific                                           |
+
 
 Any [litellm-supported model](https://docs.litellm.ai/docs/providers) works — `S0_MODEL` is passed through as-is.
 
@@ -87,10 +89,12 @@ Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHu
 
 s0-cli ships **two loops** that work together:
 
-| Loop | Command | What it does | When to run it |
-| - | - | - | - |
-| **Inner** (scan) | `s0 scan ./your-repo` | Finds vulnerabilities in your code | every PR, every nightly |
-| **Outer** (optimize) | `s0 optimize -n N` | Makes the *agent itself* smarter against a labeled benchmark | when you want a sharper scanner |
+
+| Loop                 | Command               | What it does                                                 | When to run it                  |
+| -------------------- | --------------------- | ------------------------------------------------------------ | ------------------------------- |
+| **Inner** (scan)     | `s0 scan ./your-repo` | Finds vulnerabilities in your code                           | every PR, every nightly         |
+| **Outer** (optimize) | `s0 optimize -n N`    | Makes the *agent itself* smarter against a labeled benchmark | when you want a sharper scanner |
+
 
 The outer loop doesn't scan your repo — it rewrites the scanning agent (a single Python file under `src/s0_cli/harnesses/`) and scores each rewrite on `bench/tasks_train/`. The improved agent then gets used by the next `s0 scan` you run on your code. This is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach — see the [design section](#optimizing-the-agent-meta-harness) below for the rationale.
 
@@ -139,11 +143,11 @@ jobs:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Inputs are documented in [`action.yml`](action.yml). The reusable example in [`.github/workflows/example-pr-scan.yml`](.github/workflows/example-pr-scan.yml) is what we use to dogfood it on this repo.
+Inputs are documented in `[action.yml](action.yml)`. The reusable example in `[.github/workflows/example-pr-scan.yml](.github/workflows/example-pr-scan.yml)` is what we use to dogfood it on this repo.
 
 ### Docker
 
-Multi-arch image with every scanner pre-installed (semgrep, bandit, ruff, gitleaks, trivy, ripgrep). Reproducible — versions are pinned in the [`Dockerfile`](Dockerfile).
+Multi-arch image with every scanner pre-installed (semgrep, bandit, ruff, gitleaks, trivy, ripgrep). Reproducible — versions are pinned in the `[Dockerfile](Dockerfile)`.
 
 ```bash
 docker run --rm -v "$PWD:/work" -w /work \
@@ -155,7 +159,7 @@ The published `:latest` tag tracks `main`; pin to a `vX.Y.Z` tag or a short SHA 
 
 ### pre-commit hook
 
-Two hooks ship in [`.pre-commit-hooks.yaml`](.pre-commit-hooks.yaml). The fast one runs the deterministic scanners on staged files (no LLM, no API key); the slower one runs the full LLM agent on the diff at push time.
+Two hooks ship in `[.pre-commit-hooks.yaml](.pre-commit-hooks.yaml)`. The fast one runs the deterministic scanners on staged files (no LLM, no API key); the slower one runs the full LLM agent on the diff at push time.
 
 ```yaml
 # .pre-commit-config.yaml
@@ -172,58 +176,66 @@ repos:
 
 Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.
 
-![Traditional SAST workflow vs s0-cli workflow](docs/img/vs-traditional.png)
+Traditional SAST workflow vs s0-cli workflow
 
-| | Traditional SAST | s0-cli |
-| - | - | - |
-| Detection | one scanner | 5 classic scanners + 2 AI-slop detectors, deduped |
-| Triage | manual (engineer reads each alert) | LLM agent reads source, traces taint, marks FPs |
-| Output | rule_id + line | severity + `why_real` + `fix_hint`, in markdown / JSON / SARIF |
-| Audit trail | none | full prompt + every tool call recorded under `runs/` |
-| Reproducibility | re-run and hope | replay any past scan from `runs/<id>/` |
+
+|                 | Traditional SAST                   | s0-cli                                                         |
+| --------------- | ---------------------------------- | -------------------------------------------------------------- |
+| Detection       | one scanner                        | 5 classic scanners + 2 AI-slop detectors, deduped              |
+| Triage          | manual (engineer reads each alert) | LLM agent reads source, traces taint, marks FPs                |
+| Output          | rule_id + line                     | severity + `why_real` + `fix_hint`, in markdown / JSON / SARIF |
+| Audit trail     | none                               | full prompt + every tool call recorded under `runs/`           |
+| Reproducibility | re-run and hope                    | replay any past scan from `runs/<id>/`                         |
+
 
 ## How it works
 
-![s0-cli architecture](docs/img/architecture.png)
+s0-cli architecture
 
 `s0 scan` runs every installed scanner on the target in parallel, deduplicates findings across them by `(path, line, rule_id)`, and hands the result to the inner harness — a multi-turn LLM agent with a tightly scoped tool surface. The agent reads source, greps for taint, blames git history, re-runs scanners with tighter rules, then either accepts each finding (assigning a severity and a `fix_hint`) or marks it as a false positive. Everything it does — the prompt, every tool call, every LLM response — is recorded under `runs/<timestamp>__<harness>__<id>/` so any scan is reproducible and auditable.
 
 Two scanning agents ship out of the box:
 
-| Harness                         | Turns | Use                                              |
-| ------------------------------- | ----- | ------------------------------------------------ |
-| `baseline_v0_agentic` (default) | ≤30   | full investigation (read source, taint, dedup)   |
-| `baseline_v0_singleshot`        | 1     | cheap pre-filter / CI fast path                  |
+
+| Harness                         | Turns | Use                                            |
+| ------------------------------- | ----- | ---------------------------------------------- |
+| `baseline_v0_agentic` (default) | ≤30   | full investigation (read source, taint, dedup) |
+| `baseline_v0_singleshot`        | 1     | cheap pre-filter / CI fast path                |
+
 
 Pick one with `--harness <name>` or set `S0_DEFAULT_HARNESS` in `.env`.
 
 ### Detectors
 
-| Detector              | Catches                                              | Kind          |
-| --------------------- | ---------------------------------------------------- | ------------- |
-| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic       |
-| `bandit`              | Python security smells (B-codes)                     | classic       |
-| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation   | classic       |
-| `gitleaks`            | secrets in source (matched values redacted in logs)  | classic       |
-| `trivy fs`            | filesystem vulns, secrets, misconfigurations         | classic       |
-| `hallucinated_import` | imports that aren't stdlib, declared, or local       | AST           |
-| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...    | LLM detector  |
+
+| Detector              | Catches                                                         | Kind         |
+| --------------------- | --------------------------------------------------------------- | ------------ |
+| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic      |
+| `bandit`              | Python security smells (B-codes)                                | classic      |
+| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation              | classic      |
+| `gitleaks`            | secrets in source (matched values redacted in logs)             | classic      |
+| `trivy fs`            | filesystem vulns, secrets, misconfigurations                    | classic      |
+| `hallucinated_import` | imports that aren't stdlib, declared, or local                  | AST          |
+| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...               | LLM detector |
+
 
 Findings from every detector flow into the same agent loop, which decides what to keep, what to flag as a false positive, and what severity to report. All raw scanner output, every LLM call, and every tool invocation is recorded under `runs/` for replay and audit.
 
 ## Configuration
 
-All settings live in `.env` (see [`.env.example`](.env.example)). The most useful knobs:
+All settings live in `.env` (see `[.env.example](.env.example)`). The most useful knobs:
 
-| Variable               | Default                            | Purpose                                  |
-| ---------------------- | ---------------------------------- | ---------------------------------------- |
-| `S0_MODEL`             | `anthropic/claude-sonnet-4-5`      | Any litellm-compatible model string      |
-| `S0_DEFAULT_HARNESS`   | `baseline_v0_agentic`              | Which scanning agent `s0 scan` uses      |
-| `S0_MAX_TURNS`         | `30`                               | Agent tool-loop budget per scan          |
-| `S0_TOKEN_BUDGET`      | `200000`                           | Soft input-token cap per scan            |
-| `S0_OUTPUT_CAP_BYTES`  | `30000`                            | Per-tool-observation byte cap            |
-| `S0_RUNS_DIR`          | `./runs`                           | Where to write run artifacts             |
-| `S0_FAIL_ON`           | `high`                             | Default `--fail-on` severity floor       |
+
+| Variable              | Default                       | Purpose                             |
+| --------------------- | ----------------------------- | ----------------------------------- |
+| `S0_MODEL`            | `anthropic/claude-sonnet-4-5` | Any litellm-compatible model string |
+| `S0_DEFAULT_HARNESS`  | `baseline_v0_agentic`         | Which scanning agent `s0 scan` uses |
+| `S0_MAX_TURNS`        | `30`                          | Agent tool-loop budget per scan     |
+| `S0_TOKEN_BUDGET`     | `200000`                      | Soft input-token cap per scan       |
+| `S0_OUTPUT_CAP_BYTES` | `30000`                       | Per-tool-observation byte cap       |
+| `S0_RUNS_DIR`         | `./runs`                      | Where to write run artifacts        |
+| `S0_FAIL_ON`          | `high`                        | Default `--fail-on` severity floor  |
+
 
 ## Benchmark results
 
@@ -231,12 +243,14 @@ The repository ships with 11 labeled tasks under `bench/` (7 training, 4 held-ou
 
 Two configurations on `openai/gpt-4o-mini`:
 
-| Configuration                   | Split | TP | FP | FN | Precision | Recall | F1   | Cost (in/out tokens)     |
-| ------------------------------- | ----- | -- | -- | -- | --------- | ------ | ---- | ------------------------ |
-| `--no-llm` (raw scanners only)  | train | 8  | 25 | 0  | 0.24      | **1.00** | 0.39 | 0 / 0                  |
-| `--no-llm` (raw scanners only)  | test  | 5  | 10 | 0  | 0.33      | **1.00** | 0.50 | 0 / 0                  |
-| `baseline_v0_agentic` (LLM)     | train | 8  | 23 | 0  | 0.26      | **1.00** | 0.41 | 97k / 6k               |
-| `baseline_v0_agentic` (LLM)     | test  | 5  | **7**  | 0  | **0.42** | **1.00** | **0.59** | 60k / 2k          |
+
+| Configuration                  | Split | TP  | FP    | FN  | Precision | Recall   | F1       | Cost (in/out tokens) |
+| ------------------------------ | ----- | --- | ----- | --- | --------- | -------- | -------- | -------------------- |
+| `--no-llm` (raw scanners only) | train | 8   | 25    | 0   | 0.24      | **1.00** | 0.39     | 0 / 0                |
+| `--no-llm` (raw scanners only) | test  | 5   | 10    | 0   | 0.33      | **1.00** | 0.50     | 0 / 0                |
+| `baseline_v0_agentic` (LLM)    | train | 8   | 23    | 0   | 0.26      | **1.00** | 0.41     | 97k / 6k             |
+| `baseline_v0_agentic` (LLM)    | test  | 5   | **7** | 0   | **0.42**  | **1.00** | **0.59** | 60k / 2k             |
+
 
 **What this proves:**
 
@@ -249,14 +263,14 @@ The `--no-llm` mode is a useful free anchor: you keep 100% recall and pay zero L
 
 ### Real-world run on an external repo
 
-For an end-to-end demonstration on a real codebase (OWASP **PyGoat**, ~50 modules of deliberate Django vulnerabilities) and a from-scratch optimize loop, see [`docs/results/REAL_WORLD_RESULTS.md`](docs/results/REAL_WORLD_RESULTS.md). Headline numbers from that run:
+For an end-to-end demonstration on a real codebase (OWASP **PyGoat**, ~50 modules of deliberate Django vulnerabilities) and a from-scratch optimize loop, see `[docs/results/REAL_WORLD_RESULTS.md](docs/results/REAL_WORLD_RESULTS.md)`. Headline numbers from that run:
 
 - **252 raw scanner findings → 14 kept** by the LLM agent (94% noise reduction). Every kept finding is a genuine OWASP-Top-10-class issue (pickle RCE, hallucinated imports, hardcoded credentials, Docker-as-root, command injection, broken auth, …) with a `why_real` and `fix_hint`.
 - A 2-iteration `s0 optimize -n 2 -k 2` session (~$0.12, 174s wall-clock) produced a winning harness that **lifted held-out test F1 from 0.59 → 0.67** (+18% relative). All four candidate harnesses (winners and broken alike), the Pareto frontier, and per-task traces are committed under `docs/results/` so the run is reproducible.
 
 ## Benchmark layout
 
-The bench is split into a **train** set (visible to the optimizer) and a **held-out test** set (only scored at the end of an optimize session). See [`bench/README.md`](bench/README.md) for the full task list and how to add new ones.
+The bench is split into a **train** set (visible to the optimizer) and a **held-out test** set (only scored at the end of an optimize session). See `[bench/README.md](bench/README.md)` for the full task list and how to add new ones.
 
 ```bash
 # Score the default harness on the training tasks
@@ -275,21 +289,23 @@ uv run s0 eval --no-llm
 
 The scanning agent is a single Python file. Most security tools encode their heuristics either in scattered config (`.semgrepignore`, custom rule files, hand-tuned LLM prompts) or in undocumented engineer intuition. s0-cli encodes them in a versioned harness file that gets *automatically rewritten* by an outer optimization loop, based on real evaluation data — this is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach (Lee et al., 2026).
 
-![s0 optimize outer loop](docs/img/optimize-loop.png)
+s0 optimize outer loop
 
-`s0 optimize` runs the loop: a coding-agent proposer reads `runs/` (every prior agent, every score, every tool trace), forms a hypothesis about the worst current failure mode, writes a new harness file under `src/s0_cli/harnesses/`, and the runner validates and re-scores it on `bench/tasks_train/`. After all training iterations finish, the best-train-F1 candidate is scored once on the disjoint `bench/tasks_test/` to measure generalization. The proposer's contract is in [`SKILL.md`](SKILL.md).
+`s0 optimize` runs the loop: a coding-agent proposer reads `runs/` (every prior agent, every score, every tool trace), forms a hypothesis about the worst current failure mode, writes a new harness file under `src/s0_cli/harnesses/`, and the runner validates and re-scores it on `bench/tasks_train/`. After all training iterations finish, the best-train-F1 candidate is scored once on the disjoint `bench/tasks_test/` to measure generalization. The proposer's contract is in `[SKILL.md](SKILL.md)`.
 
 ### Why this is different from "just iterating on the prompt"
 
-| | Hand-tuning prompts/rules | Meta-Harness loop |
-| - | - | - |
-| **What changes** | a string in a config file | a whole single-file Python agent (prompts + tools + scanner-selection + dedup logic) |
-| **What measures progress** | "feels better on my test repo" | a labeled bench scored by F1, precision, recall, tokens, turns |
-| **What guards overfitting** | nothing | held-out `bench/tasks_test/` the proposer never sees |
-| **History** | `git log` of edits, no scores attached | every attempt + score + full trace lives forever in `runs/<id>/` |
-| **Cost vs. accuracy** | implicit; you pick one config | explicit Pareto frontier (F1 ↑ vs. tokens ↓) snapshotted to `runs/_frontier.json` |
-| **Reproducibility** | rerun and hope | `s0 runs show <id>` replays the exact harness file, prompts, and tool calls |
-| **Rollback** | manual revert | the prior harness file is still on disk; just point `S0_DEFAULT_HARNESS` at it |
+
+|                             | Hand-tuning prompts/rules              | Meta-Harness loop                                                                    |
+| --------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------ |
+| **What changes**            | a string in a config file              | a whole single-file Python agent (prompts + tools + scanner-selection + dedup logic) |
+| **What measures progress**  | "feels better on my test repo"         | a labeled bench scored by F1, precision, recall, tokens, turns                       |
+| **What guards overfitting** | nothing                                | held-out `bench/tasks_test/` the proposer never sees                                 |
+| **History**                 | `git log` of edits, no scores attached | every attempt + score + full trace lives forever in `runs/<id>/`                     |
+| **Cost vs. accuracy**       | implicit; you pick one config          | explicit Pareto frontier (F1 ↑ vs. tokens ↓) snapshotted to `runs/_frontier.json`    |
+| **Reproducibility**         | rerun and hope                         | `s0 runs show <id>` replays the exact harness file, prompts, and tool calls          |
+| **Rollback**                | manual revert                          | the prior harness file is still on disk; just point `S0_DEFAULT_HARNESS` at it       |
+
 
 ### Concrete leverage
 
@@ -307,7 +323,7 @@ Pass `-k N` (or `--candidates N`) to fan out **N parallel proposals per iteratio
 uv run s0 optimize -n 5 -k 2 --run-name exp_multicand --fresh
 ```
 
-Cost scales linearly with `k`, but wall-clock cost stays roughly constant (the proposers run concurrently). The strategy ladder lives in [`src/s0_cli/optimizer/strategies.py`](src/s0_cli/optimizer/strategies.py) and is deterministic — `k=2` always means slot 0 (greedy, exploit) plus slot 1 (warmer, "shrink token cost"), so reruns hit the same regions of design space.
+Cost scales linearly with `k`, but wall-clock cost stays roughly constant (the proposers run concurrently). The strategy ladder lives in `[src/s0_cli/optimizer/strategies.py](src/s0_cli/optimizer/strategies.py)` and is deterministic — `k=2` always means slot 0 (greedy, exploit) plus slot 1 (warmer, "shrink token cost"), so reruns hit the same regions of design space.
 
 ```bash
 uv run s0 optimize -n 3                            # 3 iterations on train, then held-out test pass
@@ -371,7 +387,7 @@ uv run s0 optimize -n 5
 uv run s0 scan ./your-repo --fail-on high
 ```
 
-The matcher is forgiving: a prediction matches a label if `path` is identical and `|line - gt.line| <= 5`, so you don't have to be exact on line numbers. Severity isn't matched on; it's scored separately. The full task format (multi-file targets, optional task README, etc.) is documented in [`bench/README.md`](bench/README.md).
+The matcher is forgiving: a prediction matches a label if `path` is identical and `|line - gt.line| <= 5`, so you don't have to be exact on line numbers. Severity isn't matched on; it's scored separately. The full task format (multi-file targets, optional task README, etc.) is documented in `[bench/README.md](bench/README.md)`.
 
 ### Continuous-improvement loop
 
@@ -396,12 +412,14 @@ Every confirmed miss or verified false positive in production becomes a new trai
 
 ### How many tasks do I need?
 
-| In-house tasks | What you get |
-| - | - |
-| 0 | a general agent (the shipped baseline) |
-| 1–3 | the proposer notices your task class and biases toward it |
-| 5–10 | meaningful tilt toward your codebase's vuln distribution |
-| 20+ | diminishing returns; consider moving 20–30% into `tasks_test/` to measure your-repo generalization |
+
+| In-house tasks | What you get                                                                                       |
+| -------------- | -------------------------------------------------------------------------------------------------- |
+| 0              | a general agent (the shipped baseline)                                                             |
+| 1–3            | the proposer notices your task class and biases toward it                                          |
+| 5–10           | meaningful tilt toward your codebase's vuln distribution                                           |
+| 20+            | diminishing returns; consider moving 20–30% into `tasks_test/` to measure your-repo generalization |
+
 
 Mix your tasks with the shipped ones — never replace them, or the optimizer will overfit your distribution and lose general competence.
 
@@ -415,13 +433,15 @@ Mix your tasks with the shipped ones — never replace them, or the optimizer wi
 
 ## How the LLM is used
 
-| Stage                  | Detection            | Reasoning                  | Decision              |
-| ---------------------- | -------------------- | -------------------------- | --------------------- |
-| Static scan            | classic scanners     | —                          | —                     |
-| Triage                 | —                    | LLM (single-shot or agent) | LLM                   |
-| Investigation          | LLM tool loop        | LLM tool loop              | LLM                   |
-| Vibe-code detector     | LLM as scanner       | LLM (same call)            | LLM                   |
-| Optimizer (`optimize`) | —                    | proposer LLM               | evaluator (code)      |
+
+| Stage                  | Detection        | Reasoning                  | Decision         |
+| ---------------------- | ---------------- | -------------------------- | ---------------- |
+| Static scan            | classic scanners | —                          | —                |
+| Triage                 | —                | LLM (single-shot or agent) | LLM              |
+| Investigation          | LLM tool loop    | LLM tool loop              | LLM              |
+| Vibe-code detector     | LLM as scanner   | LLM (same call)            | LLM              |
+| Optimizer (`optimize`) | —                | proposer LLM               | evaluator (code) |
+
 
 You can run with `--no-llm` to use only the deterministic scanners and no LLM at all — useful as a free baseline and for CI.
 
