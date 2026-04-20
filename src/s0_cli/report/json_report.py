@@ -10,7 +10,7 @@ from s0_cli.scanners.base import Finding
 def to_json(findings: list[Finding]) -> str:
     return json.dumps(
         {
-            "version": "0.3.2",
+            "version": "0.3.3",
             "count": len(findings),
             "findings": [f.to_dict() for f in findings],
         },
