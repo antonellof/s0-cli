@@ -92,7 +92,36 @@ uv run s0 runs show <run_id>
 uv run s0 runs grep "CWE-89"
 ```
 
-Output formats: `markdown` (default, human-readable), `json`, `sarif` (for GitHub code-scanning, GitLab SAST, etc.).
+### Output formats
+
+`s0 scan` writes one of seven formats via `--format`. The default is picked automatically: rich `terminal` UI when stdout is a TTY, `markdown` when piped or written to `--out`.
+
+| Format | Use case | Default for |
+| ------ | -------- | ----------- |
+| `terminal` | Color-coded Rich panels, grouped by severity → file. Streams safely on huge result sets. | Interactive `s0 scan ./repo` |
+| `markdown` | GitHub-flavored MD with collapsible code-snippet `<details>`. Drop into PR comments. | Piped output, `--out report.md` |
+| `json` | Full normalized findings + scanner-raw payloads + fingerprints. Stable schema. | Programmatic consumers |
+| `sarif` | OASIS Static Analysis Results. | GitHub code-scanning, GitLab SAST, Azure DevOps |
+| `csv` | One row per finding. Pipe to `column -s, -t`, `pandas.read_csv`, Excel. | Spreadsheets, ad-hoc analysis |
+| `gitlab` | [Code Quality](https://docs.gitlab.com/ee/ci/testing/code_quality.html) JSON (Code Climate compatible). | GitLab MR widgets, GitHub Code Quality |
+| `junit` | JUnit XML — every finding becomes a failed test, one suite per severity. | Jenkins, CircleCI, Azure Pipelines test reporters |
+
+```bash
+# Pretty terminal output (the default — same as omitting --format)
+uv run s0 scan ./repo
+
+# Markdown report you can paste into a PR
+uv run s0 scan ./repo --format markdown --out scan.md
+
+# CSV for spreadsheet triage
+uv run s0 scan ./repo --format csv --out scan.csv
+
+# GitLab MR Code Quality widget
+uv run s0 scan ./repo --format gitlab --out gl-code-quality.json
+
+# CI test-reporter (JUnit XML)
+uv run s0 scan ./repo --format junit --out s0-junit.xml
+```
 
 ## Quickstart: optimize the agent
 

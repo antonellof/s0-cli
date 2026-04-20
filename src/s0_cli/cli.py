@@ -18,7 +18,15 @@ from s0_cli.eval.validate import validate_harness
 from s0_cli.harness.llm import have_provider_key
 from s0_cli.harness.progress import emit as emit_progress
 from s0_cli.harness.progress import reset_sink, set_sink
-from s0_cli.report import to_json, to_markdown, to_sarif
+from s0_cli.report import (
+    to_csv,
+    to_gitlab_codequality,
+    to_json,
+    to_junit_xml,
+    to_markdown,
+    to_sarif,
+    to_terminal,
+)
 from s0_cli.runs.cli import runs_app
 from s0_cli.runs.store import RunStore, write_run
 from s0_cli.scanners import REGISTRY as SCANNER_REGISTRY
@@ -171,7 +179,15 @@ def cmd_scan(
     mode: str = typer.Option("repo", "--mode", help="repo|diff|file"),
     diff: str | None = typer.Option(None, "--diff", help="Git ref for diff mode."),
     harness: str | None = typer.Option(None, "--harness", help="Harness name."),
-    fmt: str = typer.Option("markdown", "--format", "-f", help="markdown|json|sarif"),
+    fmt: str | None = typer.Option(
+        None,
+        "--format",
+        "-f",
+        help=(
+            "Output format: terminal | markdown | json | sarif | csv | gitlab | junit. "
+            "Defaults to `terminal` for interactive stdout, `markdown` otherwise."
+        ),
+    ),
     out: Path | None = typer.Option(None, "--out", "-o", help="Output file."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Skip LLM; raw scanner findings only."),
     fail_on: str | None = typer.Option(
@@ -277,33 +293,61 @@ def cmd_scan(
     persist_size = (run_path / "findings.json").stat().st_size if (run_path / "findings.json").exists() else 0
     emit_progress("phase_done", name="persist", findings_bytes=persist_size)
 
-    emit_progress("phase_start", name="render", format=fmt, findings=len(result.findings))
-    text = _render(result.findings, fmt, target.display())
-    emit_progress("phase_done", name="render", bytes=len(text))
+    # Smart default: if --format wasn't passed, use the polished Rich
+    # renderer when stdout is a TTY (interactive `s0 scan ./repo`) and
+    # markdown for piped/file output (`s0 scan ./repo > report.md`).
+    if fmt is None:
+        fmt = "terminal" if (out is None and sys.stdout.isatty()) else "markdown"
+    fmt = fmt.lower()
 
-    # Rich's Markdown renderer is O(n) but with a very large constant — on 30+ MB
-    # of output it can wedge for minutes (looks like a hang). When the rendered
-    # text is huge AND we're going to stdout, fall back to printing a brief
-    # summary and pointing the user at --out / --format json. This was triggered
-    # by 41,734 findings × ~700 bytes each on a 2 GB target repo.
+    emit_progress("phase_start", name="render", format=fmt, findings=len(result.findings))
+    rendered = _render(
+        result.findings,
+        fmt,
+        target.display(),
+        workspace_root=target.root,
+    )
+    rendered_size = len(rendered) if isinstance(rendered, str) else 0
+    emit_progress("phase_done", name="render", bytes=rendered_size)
+
+    # Markdown printed to a TTY goes through Rich's Markdown grammar, which
+    # wedges on multi-MB strings (verified: 16 MB → 30s+ no progress, see
+    # commit 7695e69). When that's about to happen and we're not writing to
+    # a file, print a one-line summary instead. Other text formats stream
+    # through `sys.stdout.write` and don't have this problem; the terminal
+    # format uses a Rich renderable that streams natively.
     LARGE_OUTPUT_BYTES = 1_000_000  # 1 MB
+
     if out is not None:
+        # File destination: always serialize to a string. The terminal
+        # renderer doesn't apply to files; coerce to markdown.
+        if fmt == "terminal":
+            text = to_markdown(result.findings, target_label=target.display())
+        else:
+            assert isinstance(rendered, str)
+            text = rendered
         out.write_text(text, encoding="utf-8")
         if not quiet:
-            console.print(f"[green]wrote[/] {out} ({len(text):,} bytes)")
+            console.print(f"[green]wrote[/] {out} ({len(text):,} bytes, {fmt})")
     elif quiet:
         pass
-    elif fmt == "markdown" and len(text) > LARGE_OUTPUT_BYTES:
+    elif fmt == "terminal":
+        console.print(rendered)
+    elif fmt == "markdown" and rendered_size > LARGE_OUTPUT_BYTES:
         console.print(
             f"[yellow]⚠[/yellow]  {len(result.findings):,} findings would render as "
-            f"[bold]{len(text):,}[/bold] bytes of markdown — Rich would take minutes.\n"
-            f"   Re-run with [cyan]--out report.md[/cyan] or [cyan]--format json --out findings.json[/cyan] "
-            f"to get the full output, or use [cyan]--fail-on critical[/cyan] to filter."
+            f"[bold]{rendered_size:,}[/bold] bytes of markdown — Rich would take minutes.\n"
+            f"   Re-run with [cyan]--out report.md[/cyan], "
+            f"[cyan]--format terminal[/cyan] for the rich UI, or "
+            f"[cyan]--format json --out findings.json[/cyan] for tooling."
         )
     elif fmt == "markdown":
-        console.print(text)
+        # Markdown at < 1 MB — render through Rich for nice colours.
+        console.print(rendered)
     else:
-        sys.stdout.write(text + "\n")
+        # csv / json / sarif / gitlab / junit: plain text, stream out.
+        assert isinstance(rendered, str)
+        sys.stdout.write(rendered + "\n")
 
     if not quiet:
         console.print(f"[dim]run:[/] {run_path}")
@@ -478,14 +522,43 @@ def cmd_optimize(
     )
 
 
-def _render(findings, fmt: str, label: str) -> str:
+def _render(findings, fmt: str, label: str, workspace_root: Path | None = None):
+    """Dispatch to the right renderer.
+
+    Returns ``str`` for serializable formats and a Rich ``RenderableType``
+    for the ``terminal`` format. Callers MUST handle both.
+
+    ``workspace_root`` (when provided) is used by the terminal renderer to
+    resolve relative finding paths into ``file://`` URLs for clickable
+    hyperlinks in modern terminals.
+    """
     if fmt == "json":
         return to_json(findings)
     if fmt == "sarif":
         return to_sarif(findings)
     if fmt == "markdown":
         return to_markdown(findings, target_label=label)
-    raise typer.BadParameter(f"Unknown format: {fmt}")
+    if fmt == "terminal":
+        # Pass the live console width so the renderer can adapt its layout
+        # (panel border on / off). Without this, the renderer instantiates
+        # a fresh Console() which sometimes reports the default 80 cols
+        # regardless of the actual terminal.
+        return to_terminal(
+            findings,
+            target_label=label,
+            width=console.size.width,
+            workspace_root=workspace_root,
+        )
+    if fmt == "csv":
+        return to_csv(findings)
+    if fmt == "gitlab":
+        return to_gitlab_codequality(findings)
+    if fmt == "junit":
+        return to_junit_xml(findings)
+    raise typer.BadParameter(
+        f"Unknown format: {fmt}. "
+        "Choose one of: terminal, markdown, json, sarif, csv, gitlab, junit."
+    )
 
 
 def main() -> None:
