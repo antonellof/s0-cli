@@ -4,7 +4,7 @@ An LLM-driven command-line agent for finding security vulnerabilities and "vibe-
 
 s0-cli runs a hybrid of classic static scanners (`semgrep`, `bandit`, `ruff`, `gitleaks`, `trivy`) and LLM detectors, then uses a multi-turn agent to triage, deduplicate, recalibrate severity, and explain each finding. The whole scanning agent is itself optimizable: `s0 optimize` runs a [Meta-Harness](https://yoonholee.com/meta-harness/) outer loop that mutates the agent against a labeled benchmark with a held-out test set.
 
-s0-cli demo
+![s0-cli demo](docs/img/demo.gif)
 
 ## Install
 
@@ -324,7 +324,7 @@ Then just ask:
 
 Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.
 
-Traditional SAST workflow vs s0-cli workflow
+![Traditional SAST workflow vs s0-cli workflow](docs/img/vs-traditional.png)
 
 
 |                 | Traditional SAST                   | s0-cli                                                         |
@@ -338,7 +338,7 @@ Traditional SAST workflow vs s0-cli workflow
 
 ## How it works
 
-s0-cli architecture
+![s0-cli architecture](docs/img/architecture.png)
 
 `s0 scan` runs every installed scanner on the target in parallel, deduplicates findings across them by `(path, line, rule_id)`, and hands the result to the inner harness — a multi-turn LLM agent with a tightly scoped tool surface. The agent reads source, greps for taint, blames git history, re-runs scanners with tighter rules, then either accepts each finding (assigning a severity and a `fix_hint`) or marks it as a false positive. Everything it does — the prompt, every tool call, every LLM response — is recorded under `runs/<timestamp>__<harness>__<id>/` so any scan is reproducible and auditable.
 
@@ -465,7 +465,7 @@ uv run s0 eval --no-llm
 
 The scanning agent is a single Python file. Most security tools encode their heuristics either in scattered config (`.semgrepignore`, custom rule files, hand-tuned LLM prompts) or in undocumented engineer intuition. s0-cli encodes them in a versioned harness file that gets *automatically rewritten* by an outer optimization loop, based on real evaluation data — this is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach (Lee et al., 2026).
 
-s0 optimize outer loop
+![s0 optimize outer loop](docs/img/optimize-loop.png)
 
 `s0 optimize` runs the loop: a coding-agent proposer reads `runs/` (every prior agent, every score, every tool trace), forms a hypothesis about the worst current failure mode, writes a new harness file under `src/s0_cli/harnesses/`, and the runner validates and re-scores it on `bench/tasks_train/`. After all training iterations finish, the best-train-F1 candidate is scored once on the disjoint `bench/tasks_test/` to measure generalization. The proposer's contract is in `[SKILL.md](SKILL.md)`.
 
