@@ -49,6 +49,7 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     cached_input_tokens: int = 0
+    reasoning_tokens: int = 0
     finish_reason: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -149,20 +150,40 @@ def _normalize_response(resp: Any) -> LLMResponse:
     in_tok = getattr(usage, "prompt_tokens", 0) if usage else 0
     out_tok = getattr(usage, "completion_tokens", 0) if usage else 0
     cached = 0
+    reasoning_toks = 0
     if usage is not None:
         cached = (
             getattr(usage, "cache_read_input_tokens", 0)
             or getattr(usage, "prompt_cache_hit_tokens", 0)
             or 0
         )
+        # Reasoning tokens live under completion_tokens_details on
+        # OpenAI/o-series + OpenRouter; some providers attach them flat.
+        details = getattr(usage, "completion_tokens_details", None)
+        if details is not None:
+            reasoning_toks = (
+                getattr(details, "reasoning_tokens", 0)
+                if not isinstance(details, dict)
+                else details.get("reasoning_tokens", 0)
+            ) or 0
+        if not reasoning_toks:
+            reasoning_toks = getattr(usage, "reasoning_tokens", 0) or 0
+
+    # Reasoning content surfaces under different keys per provider:
+    # - OpenAI / DeepSeek: msg.reasoning_content
+    # - Anthropic (extended thinking) / OpenRouter: msg.reasoning
+    reasoning_text = (
+        getattr(msg, "reasoning_content", None) or getattr(msg, "reasoning", None)
+    )
 
     return LLMResponse(
         content=content,
         tool_calls=tool_calls,
-        reasoning=getattr(msg, "reasoning_content", None),
+        reasoning=reasoning_text,
         input_tokens=in_tok,
         output_tokens=out_tok,
         cached_input_tokens=cached,
+        reasoning_tokens=int(reasoning_toks),
         finish_reason=getattr(resp.choices[0], "finish_reason", None),
         raw={},
     )
@@ -227,3 +248,45 @@ def have_provider_key(model: str) -> bool:
     if model.startswith("azure/"):
         return bool(os.environ.get("AZURE_API_KEY") and os.environ.get("AZURE_API_BASE"))
     return True
+
+
+# Substrings that mark a model as a reasoning / thinking model. These models
+# spend significant wall-time before emitting any tokens, so the CLI swaps
+# the spinner from "waiting on LLM…" to "thinking…" so the user knows what's
+# happening. We deliberately accept some false positives — the worst case is
+# a slightly different spinner label.
+_REASONING_HINTS: tuple[str, ...] = (
+    # OpenAI o-series (o1, o3, o4) + GPT-5 reasoning
+    "o1-",
+    "o3-",
+    "o4-",
+    "/o1",
+    "/o3",
+    "/o4",
+    "gpt-5",
+    # Anthropic extended thinking
+    "thinking",
+    # DeepSeek reasoner
+    "deepseek-r1",
+    "deepseek-reasoner",
+    # Google
+    "gemini-2.0-flash-thinking",
+    "gemini-2.5-pro",  # native thinking on
+    # Qwen QwQ / Marco-o1
+    "qwq",
+    "marco-o1",
+)
+
+
+def is_reasoning_model(model: str) -> bool:
+    """Heuristic: does this model spend wall-time reasoning before answering?
+
+    Used by the CLI progress sink to render a "thinking…" indicator instead
+    of "waiting on LLM…". Detection is by name substring; the runtime sink
+    also flips into thinking mode if any response carries actual reasoning
+    content/tokens, so a missed pattern here self-corrects after turn 1.
+    """
+    if not model:
+        return False
+    m = model.lower()
+    return any(hint in m for hint in _REASONING_HINTS)

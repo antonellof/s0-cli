@@ -60,7 +60,12 @@ class RichProgressSink:
         self._scanner_total = 0
         self._tokens_in = 0
         self._tokens_out = 0
+        self._reasoning_tokens = 0
         self._max_turns = 0
+        # Latches ON the first time we see a reasoning model name OR a turn
+        # that returned actual reasoning content/tokens. Stays ON for the
+        # rest of the scan so the spinner doesn't flicker.
+        self._is_reasoning = False
 
     def __enter__(self) -> RichProgressSink:
         self._status = self.console.status(
@@ -161,10 +166,21 @@ class RichProgressSink:
             turn = f.get("turn", 0)
             self._tokens_in = int(f.get("tokens_in", 0) or 0)
             self._tokens_out = int(f.get("tokens_out", 0) or 0)
+            if f.get("is_reasoning"):
+                self._is_reasoning = True
             total = self._tokens_in + self._tokens_out
+            if self._is_reasoning:
+                # Magenta + brain emoji is the universal "reasoning" cue and
+                # a clear signal that latency before the first token is
+                # expected — not a hang.
+                tail = "thinking…"
+                colour = "magenta"
+            else:
+                tail = "waiting on LLM…"
+                colour = "cyan"
             self._set(
-                f"[cyan]agent turn {turn}/{self._max_turns}[/cyan] "
-                f"· {_fmt_tokens(total)} tok · waiting on LLM…"
+                f"[{colour}]agent turn {turn}/{self._max_turns}[/{colour}] "
+                f"· {_fmt_tokens(total)} tok · {tail}"
             )
             return
 
@@ -173,11 +189,16 @@ class RichProgressSink:
             dur = f.get("duration_ms", 0)
             in_tok = int(f.get("input_tokens", 0) or 0)
             out_tok = int(f.get("output_tokens", 0) or 0)
+            r_tok = int(f.get("reasoning_tokens", 0) or 0)
+            if r_tok or f.get("is_reasoning"):
+                self._is_reasoning = True
+                self._reasoning_tokens += r_tok
             calls = f.get("tool_calls") or []
             calls_label = ", ".join(calls) if calls else f.get("finish_reason") or "—"
+            r_part = f" reasoning={_fmt_tokens(r_tok)}" if r_tok else ""
             self._log(
                 f"[blue]llm[/blue] turn {turn} "
-                f"in={_fmt_tokens(in_tok)} out={_fmt_tokens(out_tok)} "
+                f"in={_fmt_tokens(in_tok)} out={_fmt_tokens(out_tok)}{r_part} "
                 f"[dim]({dur}ms)[/dim] → {calls_label}"
             )
             return

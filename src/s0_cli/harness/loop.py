@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from s0_cli.harness.llm import LLM, ContextOverflowError
+from s0_cli.harness.llm import LLM, ContextOverflowError, is_reasoning_model
 from s0_cli.harness.progress import emit as _emit
 from s0_cli.harness.tools import ToolCallRecord, Tools
 
@@ -64,6 +64,8 @@ async def agent_loop(
     ended_via = "budget_exhausted"
     summarized_once = False
 
+    model_is_reasoning = is_reasoning_model(llm.model)
+
     while turn < max_turns:
         turn += 1
         t0 = time.monotonic()
@@ -73,6 +75,8 @@ async def agent_loop(
             max_turns=max_turns,
             tokens_in=total_in,
             tokens_out=total_out,
+            is_reasoning=model_is_reasoning,
+            model=llm.model,
         )
 
         try:
@@ -112,14 +116,22 @@ async def agent_loop(
         total_out += resp.output_tokens
         total_cached += resp.cached_input_tokens
 
+        # Once we observe actual reasoning content/tokens, latch the
+        # reasoning flag for subsequent turns so the spinner stays in
+        # "thinking…" mode even if the name heuristic missed.
+        if resp.reasoning_tokens > 0 or resp.reasoning:
+            model_is_reasoning = True
+
         _emit(
             "llm_turn_done",
             turn=turn,
             duration_ms=elapsed_ms,
             input_tokens=resp.input_tokens,
             output_tokens=resp.output_tokens,
+            reasoning_tokens=resp.reasoning_tokens,
             tool_calls=[tc["name"] for tc in resp.tool_calls],
             finish_reason=resp.finish_reason,
+            is_reasoning=model_is_reasoning,
         )
 
         trace.append(
