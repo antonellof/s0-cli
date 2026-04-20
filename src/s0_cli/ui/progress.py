@@ -29,6 +29,14 @@ def _fmt_tokens(n: int) -> str:
     return str(n)
 
 
+def _fmt_bytes(n: int) -> str:
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f}MB"
+    if n >= 1024:
+        return f"{n / 1024:.1f}KB"
+    return f"{n}B"
+
+
 def _fmt_args(args: dict[str, Any]) -> str:
     if not args:
         return ""
@@ -111,6 +119,15 @@ class RichProgressSink:
                 self._max_turns = int(f.get("max_turns") or 0)
                 self._set("[cyan]starting agent loop…[/cyan]")
                 self._log(f"[dim]→[/dim] agent_loop (max_turns={self._max_turns})")
+            elif name == "persist":
+                count = int(f.get("findings", 0) or 0)
+                self._set(f"[cyan]persisting run ({count:,} findings)…[/cyan]")
+                self._log(f"[dim]→[/dim] persist findings={count:,}")
+            elif name == "render":
+                fmt = f.get("format", "?")
+                count = int(f.get("findings", 0) or 0)
+                self._set(f"[cyan]rendering {fmt} ({count:,} findings)…[/cyan]")
+                self._log(f"[dim]→[/dim] render format={fmt} findings={count:,}")
             return
 
         if event == "phase_done":
@@ -127,6 +144,14 @@ class RichProgressSink:
                 self._log(
                     f"[green]✓[/green] agent_loop turns={turns} ended_via={ended}"
                 )
+            elif name == "persist":
+                bytes_out = int(f.get("findings_bytes", 0) or 0)
+                self._log(
+                    f"[green]✓[/green] persist findings.json={_fmt_bytes(bytes_out)}"
+                )
+            elif name == "render":
+                bytes_out = int(f.get("bytes", 0) or 0)
+                self._log(f"[green]✓[/green] render → {_fmt_bytes(bytes_out)}")
             return
 
         if event == "scanner_start":

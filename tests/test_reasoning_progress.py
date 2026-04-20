@@ -19,7 +19,7 @@ import pytest
 from rich.console import Console
 
 from s0_cli.harness.llm import is_reasoning_model
-from s0_cli.ui.progress import RichProgressSink
+from s0_cli.ui.progress import RichProgressSink, _fmt_bytes
 
 
 @pytest.mark.parametrize(
@@ -129,6 +129,39 @@ def test_sink_latches_thinking_after_reasoning_tokens_observed() -> None:
             {"turn": 2, "max_turns": 30, "is_reasoning": False},
         )
         assert sink._is_reasoning is True
+
+
+def test_sink_handles_persist_and_render_phases() -> None:
+    """Regression for the user-reported "stuck after agent_loop" symptom.
+
+    Before this commit there was no progress signalling between agent_loop
+    completion and the final ``console.print(markdown_text)`` call, which
+    on a huge ThinkMoon-style scan (41,734 findings → 16 MB of markdown)
+    silently wedged in Rich's renderer. The persist + render phase events
+    + the 1 MB output cap in ``cmd_scan`` together fix the symptom.
+    """
+    sink, _ = _make_sink()
+    with sink:
+        # Should not raise on either new phase.
+        sink("phase_start", {"name": "persist", "findings": 41734})
+        sink("phase_done", {"name": "persist", "findings_bytes": 59 * 1024 * 1024})
+        sink("phase_start", {"name": "render", "format": "markdown", "findings": 41734})
+        sink("phase_done", {"name": "render", "bytes": 16_094_059})
+
+
+@pytest.mark.parametrize(
+    ("n", "expected"),
+    [
+        (0, "0B"),
+        (512, "512B"),
+        (1024, "1.0KB"),
+        (1536, "1.5KB"),
+        (1024 * 1024, "1.0MB"),
+        (16_094_059, "15.3MB"),
+    ],
+)
+def test_fmt_bytes(n: int, expected: str) -> None:
+    assert _fmt_bytes(n) == expected
 
 
 def test_sink_accumulates_reasoning_tokens_across_turns() -> None:

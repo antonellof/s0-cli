@@ -16,6 +16,7 @@ from s0_cli.config import SEVERITY_RANK, get_settings
 from s0_cli.eval.runner import EvalRunner, load_harness_by_name
 from s0_cli.eval.validate import validate_harness
 from s0_cli.harness.llm import have_provider_key
+from s0_cli.harness.progress import emit as emit_progress
 from s0_cli.harness.progress import reset_sink, set_sink
 from s0_cli.report import to_json, to_markdown, to_sarif
 from s0_cli.runs.cli import runs_app
@@ -144,6 +145,7 @@ def cmd_scan(
 
     invocation = " ".join(["s0", "scan", str(path), "--mode", mode] + (["--no-llm"] if no_llm else []))
     store = RunStore(settings.runs_dir)
+    emit_progress("phase_start", name="persist", findings=len(result.findings))
     run_path, run_id = write_run(
         store=store,
         harness=h,
@@ -159,17 +161,36 @@ def cmd_scan(
         },
         result=result,
     )
+    persist_size = (run_path / "findings.json").stat().st_size if (run_path / "findings.json").exists() else 0
+    emit_progress("phase_done", name="persist", findings_bytes=persist_size)
 
+    emit_progress("phase_start", name="render", format=fmt, findings=len(result.findings))
     text = _render(result.findings, fmt, target.display())
+    emit_progress("phase_done", name="render", bytes=len(text))
+
+    # Rich's Markdown renderer is O(n) but with a very large constant — on 30+ MB
+    # of output it can wedge for minutes (looks like a hang). When the rendered
+    # text is huge AND we're going to stdout, fall back to printing a brief
+    # summary and pointing the user at --out / --format json. This was triggered
+    # by 41,734 findings × ~700 bytes each on a 2 GB target repo.
+    LARGE_OUTPUT_BYTES = 1_000_000  # 1 MB
     if out is not None:
         out.write_text(text, encoding="utf-8")
         if not quiet:
-            console.print(f"[green]wrote[/] {out}")
+            console.print(f"[green]wrote[/] {out} ({len(text):,} bytes)")
+    elif quiet:
+        pass
+    elif fmt == "markdown" and len(text) > LARGE_OUTPUT_BYTES:
+        console.print(
+            f"[yellow]⚠[/yellow]  {len(result.findings):,} findings would render as "
+            f"[bold]{len(text):,}[/bold] bytes of markdown — Rich would take minutes.\n"
+            f"   Re-run with [cyan]--out report.md[/cyan] or [cyan]--format json --out findings.json[/cyan] "
+            f"to get the full output, or use [cyan]--fail-on critical[/cyan] to filter."
+        )
+    elif fmt == "markdown":
+        console.print(text)
     else:
-        if fmt == "markdown" and not quiet:
-            console.print(text)
-        elif not quiet:
-            sys.stdout.write(text + "\n")
+        sys.stdout.write(text + "\n")
 
     if not quiet:
         console.print(f"[dim]run:[/] {run_path}")
