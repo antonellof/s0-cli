@@ -1,6 +1,6 @@
 [project]
 name = "s0-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Security-Zero CLI: a Meta-Harness-shaped agent for scanning code for security and vibe-code issues."
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -27,9 +27,13 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.5",
 ]
+mcp = [
+    "mcp>=1.2",
+]
 
 [project.scripts]
 s0 = "s0_cli.cli:app"
+s0-mcp = "s0_cli.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]

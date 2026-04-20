@@ -196,6 +196,45 @@ repos:
         stages: [pre-push]
 ```
 
+## Use it from your AI assistant (MCP)
+
+s0-cli ships a built-in **MCP (Model Context Protocol) server** so any MCP-compatible client — **Claude Desktop**, **Claude Code**, **Cursor**, **Continue**, **Zed**, **Cline**, etc. — can use it as a tool. Your assistant calls a typed function instead of you copy-pasting CLI output into chat.
+
+```bash
+uv tool install 's0-cli[mcp] @ git+https://github.com/antonellof/s0-cli'
+```
+
+Then add **one** snippet to your MCP client's config:
+
+```jsonc
+// Cursor: ~/.cursor/mcp.json   ·   Claude Desktop: claude_desktop_config.json
+// Claude Code: ~/.claude.json
+{
+  "mcpServers": {
+    "s0-cli": { "command": "s0-mcp", "args": [] }
+  }
+}
+```
+
+You get four tools:
+
+| Tool | What it does |
+|---|---|
+| `scan_path(path, no_llm, scanners, exclude_scanners, harness)` | Hybrid SAST + LLM scan of a directory or file. |
+| `scan_diff(repo_path, base, head, no_llm)` | Scan only the diff between two git refs (great for PR review). |
+| `list_scanners()` | Discover the available scanners. |
+| `list_harnesses()` | Discover bundled harnesses. |
+
+A **Claude Code skill** (`.claude/skills/s0-cli/SKILL.md`) and a **Cursor rule** (`.cursor/rules/s0-cli.mdc`) ship with the repo too — they teach the assistant *when* to invoke s0 (security audit, vulnerability scan, PR review, "is this AI-generated code safe to ship", etc.) and how to summarize results without dumping 200 raw findings into chat.
+
+Then just ask:
+
+> *"Audit ./src for security issues"*
+> *"Scan the diff in this PR"*
+> *"Check if there are any hardcoded secrets in this repo"*
+
+→ Full step-by-step setup for every supported client lives in **[`docs/integrations/INSTALL.md`](docs/integrations/INSTALL.md)**.
+
 ## Why not just run `semgrep` directly?
 
 Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.

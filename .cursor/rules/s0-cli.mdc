@@ -1,0 +1,48 @@
+---
+description: Use s0-cli (local hybrid SAST + LLM agent) for security audits, vulnerability scans, PR security reviews, and "vibe-code" detection. Triggered when the user asks about security, CVEs, OWASP, secrets, SQL injection, XSS, SSRF, weak crypto, or whether AI-generated code is safe to ship.
+globs:
+alwaysApply: false
+---
+
+# Use s0-cli for security tasks
+
+When the user asks for any security audit, vulnerability scan, PR security review, secrets check, or "is this AI-generated code safe to ship" — **do not roll your own analysis from scratch**. Run `s0-cli` first; it will produce structured, deduplicated findings from five SAST scanners (semgrep, bandit, ruff, gitleaks, trivy) plus two LLM detectors (hallucinated-import, vibe-code) in one shot.
+
+## Preferred: MCP
+
+If `s0-cli` is wired in as an MCP server (see `docs/integrations/INSTALL.md`), use:
+
+- `scan_path(path, no_llm=true, scanners=null, exclude_scanners=null)` — directory or file
+- `scan_diff(repo_path, base="HEAD~1", head="HEAD", no_llm=true)` — git diff range
+- `list_scanners()` / `list_harnesses()` — discovery
+
+Default `no_llm=true`. Only enable LLM triage when the user explicitly asks for "deep triage" or "explanations".
+
+## Fallback: shell
+
+If the MCP tools aren't available, shell out:
+
+```bash
+s0 scan <path> --no-llm --format json --out /tmp/scan.json --quiet
+s0 scan --diff main..HEAD --no-llm --format json --out /tmp/scan.json --quiet
+s0 scanners                                    # list available scanners
+```
+
+`--format json --out <file> --quiet` is mandatory for parseable output (otherwise progress events intermix with JSON on stdout).
+
+## Reading findings
+
+Each finding has `path`, `line`, `severity` (critical|high|medium|low|info), `rule_id`, `message`, optional `cwe`, `source` (which scanner), and (with LLM triage) `why` / `fix`.
+
+When presenting results to the user:
+
+1. Lead with critical + high.
+2. Group by file.
+3. Quote the line number so the user can jump there (Cursor: ⌘-click works).
+4. Offer to filter further before dumping >20 findings.
+
+## Don'ts
+
+- Don't run `scan_path` on `~` or `/`. Confirm the scope first.
+- Don't enable `no_llm=false` without warning the user about API costs.
+- Don't treat findings as ground truth — SAST has false positives. Cross-check before suggesting changes.
