@@ -4,7 +4,7 @@ An LLM-driven command-line agent for finding security vulnerabilities and "vibe-
 
 s0-cli runs a hybrid of classic static scanners (`semgrep`, `bandit`, `ruff`, `gitleaks`, `trivy`) and LLM detectors, then uses a multi-turn agent to triage, deduplicate, recalibrate severity, and explain each finding. The whole scanning agent is itself optimizable: `s0 optimize` runs a [Meta-Harness](https://yoonholee.com/meta-harness/) outer loop that mutates the agent against a labeled benchmark with a held-out test set.
 
-![s0-cli demo](docs/img/demo.gif)
+s0-cli demo
 
 ## Install
 
@@ -60,8 +60,12 @@ uv run s0 scan ./repo --exclude-scanner trivy -x gitleaks      # use defaults mi
 ## Quickstart
 
 ```bash
-# Scan an entire repository
+# Scan an entire repository (default agent: triages classic + AI-slop scanners)
 uv run s0 scan ./path/to/repo
+
+# Hunt UNKNOWN vulnerability classes (SSRF, IDOR, auth bypass, race, ...)
+# — LLM-driven, no scanner seeds, finds bugs pattern matchers cannot
+uv run s0 scan ./path/to/repo --harness vulnhunter_v0
 
 # Scan only the diff against a branch (great for PRs)
 uv run s0 scan ./path/to/repo --mode diff --diff main
@@ -71,6 +75,9 @@ uv run s0 scan ./path/to/repo/file.py --mode file
 
 # Skip the LLM entirely; raw scanner findings only (zero-cost smoke test)
 uv run s0 scan ./path/to/repo --no-llm --format sarif --out report.sarif
+
+# Just the supply-chain layer (CVEs + repo trust + malicious-pkg heuristics)
+uv run s0 scan ./path/to/repo --no-llm --scanner supply_chain
 
 # Fail the build if any high-severity issue is found
 uv run s0 scan . --fail-on high
@@ -84,19 +91,23 @@ uv run s0 runs show <run_id>
 uv run s0 runs grep "CWE-89"
 ```
 
+> **Tip — combine the agents.** Run both for full coverage: `s0 scan ./repo && s0 scan ./repo --harness vulnhunter_v0`. The first calibrates known-class findings (semgrep / bandit / trivy / supply_chain seeds → LLM triage). The second hunts novel classes pattern matchers cannot see (SSRF, IDOR, auth bypass, TOCTOU, mass assignment, subtle crypto, path traversal). Findings from both runs share the same fingerprint scheme, so downstream tools dedup automatically.
+
 ### Output formats
 
 `s0 scan` writes one of seven formats via `--format`. The default is picked automatically: rich `terminal` UI when stdout is a TTY, `markdown` when piped or written to `--out`.
 
-| Format | Use case | Default for |
-| ------ | -------- | ----------- |
-| `terminal` | Color-coded Rich panels, grouped by severity → file. Streams safely on huge result sets. | Interactive `s0 scan ./repo` |
-| `markdown` | GitHub-flavored MD with collapsible code-snippet `<details>`. Drop into PR comments. | Piped output, `--out report.md` |
-| `json` | Full normalized findings + scanner-raw payloads + fingerprints. Stable schema. | Programmatic consumers |
-| `sarif` | OASIS Static Analysis Results. | GitHub code-scanning, GitLab SAST, Azure DevOps |
-| `csv` | One row per finding. Pipe to `column -s, -t`, `pandas.read_csv`, Excel. | Spreadsheets, ad-hoc analysis |
-| `gitlab` | [Code Quality](https://docs.gitlab.com/ee/ci/testing/code_quality.html) JSON (Code Climate compatible). | GitLab MR widgets, GitHub Code Quality |
-| `junit` | JUnit XML — every finding becomes a failed test, one suite per severity. | Jenkins, CircleCI, Azure Pipelines test reporters |
+
+| Format     | Use case                                                                                                | Default for                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `terminal` | Color-coded Rich panels, grouped by severity → file. Streams safely on huge result sets.                | Interactive `s0 scan ./repo`                      |
+| `markdown` | GitHub-flavored MD with collapsible code-snippet `<details>`. Drop into PR comments.                    | Piped output, `--out report.md`                   |
+| `json`     | Full normalized findings + scanner-raw payloads + fingerprints. Stable schema.                          | Programmatic consumers                            |
+| `sarif`    | OASIS Static Analysis Results.                                                                          | GitHub code-scanning, GitLab SAST, Azure DevOps   |
+| `csv`      | One row per finding. Pipe to `column -s, -t`, `pandas.read_csv`, Excel.                                 | Spreadsheets, ad-hoc analysis                     |
+| `gitlab`   | [Code Quality](https://docs.gitlab.com/ee/ci/testing/code_quality.html) JSON (Code Climate compatible). | GitLab MR widgets, GitHub Code Quality            |
+| `junit`    | JUnit XML — every finding becomes a failed test, one suite per severity.                                | Jenkins, CircleCI, Azure Pipelines test reporters |
+
 
 ```bash
 # Pretty terminal output (the default — same as omitting --format)
@@ -224,12 +235,14 @@ Then add **one** snippet to your MCP client's config:
 
 You get four tools:
 
-| Tool | What it does |
-|---|---|
-| `scan_path(path, no_llm, scanners, exclude_scanners, harness)` | Hybrid SAST + LLM scan of a directory or file. |
-| `scan_diff(repo_path, base, head, no_llm)` | Scan only the diff between two git refs (great for PR review). |
-| `list_scanners()` | Discover the available scanners. |
-| `list_harnesses()` | Discover bundled harnesses. |
+
+| Tool                                                           | What it does                                                   |
+| -------------------------------------------------------------- | -------------------------------------------------------------- |
+| `scan_path(path, no_llm, scanners, exclude_scanners, harness)` | Hybrid SAST + LLM scan of a directory or file.                 |
+| `scan_diff(repo_path, base, head, no_llm)`                     | Scan only the diff between two git refs (great for PR review). |
+| `list_scanners()`                                              | Discover the available scanners.                               |
+| `list_harnesses()`                                             | Discover bundled harnesses.                                    |
+
 
 A **Claude Code skill** (`.claude/skills/s0-cli/SKILL.md`) and a **Cursor rule** (`.cursor/rules/s0-cli.mdc`) ship with the repo too — they teach the assistant *when* to invoke s0 (security audit, vulnerability scan, PR review, "is this AI-generated code safe to ship", etc.) and how to summarize results without dumping 200 raw findings into chat.
 
@@ -239,13 +252,13 @@ Then just ask:
 > *"Scan the diff in this PR"*
 > *"Check if there are any hardcoded secrets in this repo"*
 
-→ Full step-by-step setup for every supported client lives in **[`docs/integrations/INSTALL.md`](docs/integrations/INSTALL.md)**.
+→ Full step-by-step setup for every supported client lives in `**[docs/integrations/INSTALL.md](docs/integrations/INSTALL.md)`**.
 
 ## Why not just run `semgrep` directly?
 
 Running a single static scanner gives you a wall of JSON; you still have to read every alert, decide which are real, and hunt down the data flow by hand. s0-cli runs the scanners *plus* an LLM agent that does that triage for you — and writes down every step it took so you can audit the result.
 
-![Traditional SAST workflow vs s0-cli workflow](docs/img/vs-traditional.png)
+Traditional SAST workflow vs s0-cli workflow
 
 
 |                 | Traditional SAST                   | s0-cli                                                         |
@@ -259,18 +272,18 @@ Running a single static scanner gives you a wall of JSON; you still have to read
 
 ## How it works
 
-![s0-cli architecture](docs/img/architecture.png)
+s0-cli architecture
 
 `s0 scan` runs every installed scanner on the target in parallel, deduplicates findings across them by `(path, line, rule_id)`, and hands the result to the inner harness — a multi-turn LLM agent with a tightly scoped tool surface. The agent reads source, greps for taint, blames git history, re-runs scanners with tighter rules, then either accepts each finding (assigning a severity and a `fix_hint`) or marks it as a false positive. Everything it does — the prompt, every tool call, every LLM response — is recorded under `runs/<timestamp>__<harness>__<id>/` so any scan is reproducible and auditable.
 
 Three scanning agents ship out of the box:
 
 
-| Harness                         | Turns | Strategy                                       | Use                                            |
-| ------------------------------- | ----- | ---------------------------------------------- | ---------------------------------------------- |
-| `baseline_v0_agentic` (default) | ≤30   | triage findings from 8 classic + AI detectors  | full investigation (read source, taint, dedup) |
-| `baseline_v0_singleshot`        | 1     | one-shot triage of semgrep candidates          | cheap pre-filter / CI fast path                |
-| `vulnhunter_v0`                 | ≤25   | LLM hunts novel classes (no scanner seeds)     | find SSRF / IDOR / RCE / auth bypass / TOCTOU  |
+| Harness                         | Turns | Strategy                                      | Use                                            |
+| ------------------------------- | ----- | --------------------------------------------- | ---------------------------------------------- |
+| `baseline_v0_agentic` (default) | ≤30   | triage findings from 8 classic + AI detectors | full investigation (read source, taint, dedup) |
+| `baseline_v0_singleshot`        | 1     | one-shot triage of semgrep candidates         | cheap pre-filter / CI fast path                |
+| `vulnhunter_v0`                 | ≤25   | LLM hunts novel classes (no scanner seeds)    | find SSRF / IDOR / RCE / auth bypass / TOCTOU  |
 
 
 Pick one with `--harness <name>` or set `S0_DEFAULT_HARNESS` in `.env`. Run them in sequence (`s0 scan --harness baseline_v0_agentic && s0 scan --harness vulnhunter_v0`) when you want both "calibrate the known" and "find the unknown".
@@ -280,16 +293,16 @@ Pick one with `--harness <name>` or set `S0_DEFAULT_HARNESS` in `.env`. Run them
 s0-cli ships with two flavors of detector. **Classic / AST** detectors catch known vulnerability classes that someone has already written rules for. **AI / supply-chain** detectors catch the long tail: AI-hallucinated code, intent-level smells, malicious dependencies, and untrustworthy upstream repos.
 
 
-| Detector              | Catches                                                         | Kind                |
-| --------------------- | --------------------------------------------------------------- | ------------------- |
-| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic             |
-| `bandit`              | Python security smells (B-codes)                                | classic             |
-| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation              | classic             |
-| `gitleaks`            | secrets in source (matched values redacted in logs)             | classic             |
-| `trivy fs`            | filesystem vulns, secrets, misconfigurations                    | classic             |
-| `hallucinated_import` | imports that aren't stdlib, declared, or local                  | AST                 |
-| `supply_chain`        | OSV-Scanner CVEs + OpenSSF Scorecard trust + guarddog malware   | supply chain        |
-| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...               | LLM detector        |
+| Detector              | Catches                                                         | Kind         |
+| --------------------- | --------------------------------------------------------------- | ------------ |
+| `semgrep`             | broad SAST patterns (auto + p/security-audit + p/owasp-top-ten) | classic      |
+| `bandit`              | Python security smells (B-codes)                                | classic      |
+| `ruff` (`S`, `B`)     | security + bugbear lints, with severity escalation              | classic      |
+| `gitleaks`            | secrets in source (matched values redacted in logs)             | classic      |
+| `trivy fs`            | filesystem vulns, secrets, misconfigurations                    | classic      |
+| `hallucinated_import` | imports that aren't stdlib, declared, or local                  | AST          |
+| `supply_chain`        | OSV-Scanner CVEs + OpenSSF Scorecard trust + guarddog malware   | supply chain |
+| `vibe`                | stub auth, dummy crypto, hardcoded backdoors, ...               | LLM detector |
 
 
 Findings from every detector flow into the same agent loop, which decides what to keep, what to flag as a false positive, and what severity to report. All raw scanner output, every LLM call, and every tool invocation is recorded under `runs/` for replay and audit.
@@ -302,21 +315,19 @@ Pattern-matching SAST is bounded by what the rule authors thought of. To go beyo
   - **OSV-Scanner** queries `osv.dev` for CVEs/GHSAs across pip, npm, cargo, go, maven, composer, gem (broader coverage than Trivy on OSS lockfiles).
   - **OpenSSF Scorecard** scores the upstream GitHub repo's *trustworthiness* — unsigned releases, missing branch protection, dead maintainers, no SECURITY.md. None of these are CVEs; all of them predict future incidents.
   - **guarddog** runs heuristic rules against PyPI packages to flag *actively malicious* code (install-time exec, exfil endpoints, typosquats, base64-encoded payloads).
-
   Each backend is independently optional — install the binary you have and skip the rest. `s0 scanners` shows which are wired.
+- `**vulnhunter_v0` harness** is an LLM-driven novelty hunter that doesn't consume scanner seeds. It reads the codebase top-down, maps every HTTP / queue / webhook entry point, and traces tainted-data flow into eight specific bug classes:
 
-- **`vulnhunter_v0` harness** is an LLM-driven novelty hunter that doesn't consume scanner seeds. It reads the codebase top-down, maps every HTTP / queue / webhook entry point, and traces tainted-data flow into eight specific bug classes:
-
-  | Class                                | CWE     |
-  | ------------------------------------ | ------- |
-  | SSRF via webhooks / image proxies    | CWE-918 |
-  | Indirect RCE (SSTI, deserialization) | CWE-94, CWE-502 |
-  | IDOR / broken object-level authz     | CWE-639 |
-  | Authentication / session bypass      | CWE-287 |
-  | Race conditions / TOCTOU             | CWE-367 |
-  | Mass-assignment / unsafe ORM use     | CWE-915 |
-  | Crypto mistakes (IV reuse, weak HMAC compare) | CWE-327 |
-  | Path traversal through subtle joins  | CWE-22  |
+  | Class                                         | CWE             |
+  | --------------------------------------------- | --------------- |
+  | SSRF via webhooks / image proxies             | CWE-918         |
+  | Indirect RCE (SSTI, deserialization)          | CWE-94, CWE-502 |
+  | IDOR / broken object-level authz              | CWE-639         |
+  | Authentication / session bypass               | CWE-287         |
+  | Race conditions / TOCTOU                      | CWE-367         |
+  | Mass-assignment / unsafe ORM use              | CWE-915         |
+  | Crypto mistakes (IV reuse, weak HMAC compare) | CWE-327         |
+  | Path traversal through subtle joins           | CWE-22          |
 
   These are application-logic bugs that depend on *how the pieces compose*, which pattern matchers can't see. Run with `s0 scan PATH --harness vulnhunter_v0` (LLM-required; no `--no-llm` fallback by design).
 
@@ -388,7 +399,7 @@ uv run s0 eval --no-llm
 
 The scanning agent is a single Python file. Most security tools encode their heuristics either in scattered config (`.semgrepignore`, custom rule files, hand-tuned LLM prompts) or in undocumented engineer intuition. s0-cli encodes them in a versioned harness file that gets *automatically rewritten* by an outer optimization loop, based on real evaluation data — this is the [Meta-Harness](https://yoonholee.com/meta-harness/) approach (Lee et al., 2026).
 
-![s0 optimize outer loop](docs/img/optimize-loop.png)
+s0 optimize outer loop
 
 `s0 optimize` runs the loop: a coding-agent proposer reads `runs/` (every prior agent, every score, every tool trace), forms a hypothesis about the worst current failure mode, writes a new harness file under `src/s0_cli/harnesses/`, and the runner validates and re-scores it on `bench/tasks_train/`. After all training iterations finish, the best-train-F1 candidate is scored once on the disjoint `bench/tasks_test/` to measure generalization. The proposer's contract is in `[SKILL.md](SKILL.md)`.
 

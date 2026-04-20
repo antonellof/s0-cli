@@ -1,6 +1,6 @@
 [project]
 name = "s0-cli"
-version = "0.2.1"
+version = "0.3.0"
 description = "Security-Zero CLI: a Meta-Harness-shaped agent for scanning code for security and vibe-code issues."
 readme = "README.md"
 license = { text = "Apache-2.0" }
