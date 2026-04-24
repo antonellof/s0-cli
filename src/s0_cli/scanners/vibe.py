@@ -84,10 +84,24 @@ class VibeLLMScanner:
         self._settings = get_settings()
 
     def is_available(self) -> bool:
-        # Available iff a provider key is set. Doctor uses the same heuristic.
+        # Available iff *any* provider key litellm understands is set, OR an
+        # OpenAI-compatible endpoint is configured (Ollama / vLLM / Azure …).
+        # We mirror harness/llm.py here so `s0 doctor` and the vibe scanner
+        # agree: if the agent loop can talk to a model, vibe_llm should too.
         return any(
             os.environ.get(k)
-            for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY")
+            for k in (
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "GEMINI_API_KEY",
+                "GROQ_API_KEY",
+                "OPENROUTER_API_KEY",
+                "MISTRAL_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "OPENAI_API_BASE",
+                "OLLAMA_API_BASE",
+                "AZURE_API_KEY",
+            )
         )
 
     def run(self, target: Target) -> list[Finding]:
